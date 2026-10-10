@@ -22,9 +22,13 @@ development.)
 ## The hotkey (service kind)
 
 `Service.qml` registers `ALT+SPACE -> omarchy-shell shell toggle
-io.github.macifyer.pallet` at runtime via `hyprctl keyword bindd`, after the
-pattern of MaNi4's plugin:
+io.github.macifyer.pallet` at runtime, after the pattern of MaNi4's plugin:
 
+- Registration goes through `hyprctl eval` with `hl.bind(...)` Lua —
+  `hyprctl keyword bindd` does not land reliably at runtime (learned the hard
+  way: a bind that logged success while Hyprland held nothing).
+- Registration is verified: 500 ms after registering, the binds are re-read;
+  the log says `confirmed` or warns that the bind did not land.
 - Existing binds are read first (`hyprctl binds -j`). If ALT+SPACE is taken,
   Pallet logs a warning and does not override it; bind the toggle yourself.
 - Our binding is identified by its description (`Pallet command palette`), so
@@ -33,7 +37,7 @@ pattern of MaNi4's plugin:
   (`configreloaded`) re-asserts the bind. This needs `socat`; without it the
   bind vanishes on reload until the plugin reloads.
 - Disabling/removing the plugin destroys the service, which unbinds the combo
-  it registered.
+  it registered (`hl.unbind`).
 
 ## Develop against the real shell
 
@@ -57,19 +61,15 @@ and `git pull` there is the update loop. A separate clone elsewhere (e.g.
 - **Never run `omarchy plugin remove` with your terminal cd'd inside the
   plugin dir.** The removal deletes your cwd; every later command in that
   shell dies with `getcwd: cannot access parent directories`. `cd ~` first.
-- **"File name case mismatch" on a correctly-cased file** — Quickshell's
-  runtime cache can go stale when plugin files churn (git pulls, remove/add
-  cycles). Clear it and rescan:
-
-  ```sh
-  rm -rf ~/.cache/quickshell
-  omarchy-shell shell rescanPlugins
-  ```
-
+- **Plugin changes that "should" work but don't** — restart the shell:
+  `omarchy-restart-shell`. The long-lived process accumulates poisoned state
+  across many plugin reload cycles (this cost us an afternoon: a phantom
+  "File name case mismatch" that survived pristine files).
+- **"File name case mismatch" on a correctly-cased file** — clear the
+  runtime cache and restart: `rm -rf ~/.cache/quickshell`,
+  `omarchy-restart-shell`.
 - **Entry point naming** — service entry points are named `Service.qml` by
-  convention (first-party plugins and MaNi4's working plugin alike). We hit a
-  service-load failure with a custom name; the conventional name is what we
-  ship.
+  convention (first-party plugins and MaNi4's working plugin alike).
 - **Fresh reinstall:** `omarchy plugin remove io.github.macifyer.pallet`,
   then `omarchy plugin add <url> --enable` (from a sane cwd).
 
@@ -84,10 +84,11 @@ omarchy plugin update io.github.macifyer.pallet
 ```sh
 omarchy plugin list --json | jq '.[] | select(.id == "io.github.macifyer.pallet")'
 qs log -p "$OMARCHY_PATH/shell" --tail 100
+hyprctl binds -j | jq '.[] | select(.description == "Pallet command palette")'
 ```
 
-Look for `pallet: ALT+SPACE -> omarchy-shell shell toggle ...` to confirm the
-service bound the key, or the conflict warning if it refused.
+The last command is ground truth for the hotkey: it shows the binding
+Hyprland actually holds, not what any log line claims.
 
 ## Publish checklist
 

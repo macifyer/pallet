@@ -11,11 +11,13 @@ Rectangle {
     //   2. active icon theme via Quickshell.iconPath (explicit-fallback mode,
     //      so a miss returns "" instead of a junk path)
     //   3. nothing -> the fallback glyph
+    // Relative paths (Wine entries like "icons/windows.png") are NOT file
+    // paths; they fall through to the themed lookup, which misses cleanly.
     readonly property string iconSource: {
         const icon = root.modelData.icon ?? "";
         if (icon.length === 0)
             return "";
-        if (icon.indexOf("/") !== -1)
+        if (icon.startsWith("/"))
             return "file://" + icon;
         return Quickshell.iconPath(icon, true);
     }
