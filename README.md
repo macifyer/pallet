@@ -1,5 +1,7 @@
 # Pallet
 
+![Pallet](preview.png)
+
 A keyboard-driven command palette for Omarchy on Arch/Hyprland, built on Quickshell. Summon it, type, act — applications, windows, calculation, script commands, and the focused application's own menu items via AT-SPI.
 
 **Status:** early but daily-drivable. App search, fuzzy ranking, theme icons, and focused-app menu search work; more providers land next.
@@ -43,7 +45,7 @@ See docs/PLUGIN.md for the lifecycle contract, validation, and publish checklist
 ```
 manifest.json      Omarchy plugin contract
 PalletOverlay.qml  overlay entry point (summon/hide -> open/close)
-PalletService.qml  service entry point (self-registering ALT+SPACE hotkey)
+Service.qml        service entry point (self-registering ALT+SPACE hotkey)
 shell/             Quickshell QML (window, search, results, actions)
 src/               Python core (provider host: fanout, merge, cancel)
 providers/         One directory per provider (apps, menus, ...)
