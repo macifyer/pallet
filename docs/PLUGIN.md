@@ -37,16 +37,20 @@ pattern of MaNi4's plugin:
 
 ## Develop against the real shell
 
+The validator rejects symlinked plugin folders outright, so the development
+checkout IS the plugin directory — a real git clone inside the plugins dir:
+
 ```sh
-ln -s ~/Projects/pallet ~/.config/omarchy/plugins/io.github.macifyer.pallet
+git clone git@github.com:macifyer/pallet.git \
+    ~/.config/omarchy/plugins/io.github.macifyer.pallet
 omarchy-shell shell rescanPlugins
 omarchy plugin validate ~/.config/omarchy/plugins/io.github.macifyer.pallet
 omarchy plugin enable io.github.macifyer.pallet
 ```
 
-The plugin directory may itself be a symlink (removal unlinks it); no symlinks
-are allowed inside the folder. Saving files under the plugins directory
-auto-reloads the plugin — so the dev update loop is just `git pull`.
+Edit, commit, and push from that directory. The shell auto-reloads on save,
+and `git pull` there is the update loop. A separate clone elsewhere (e.g.
+~/Projects/pallet) is only useful for standalone `qs -p shell` testing.
 
 ## Updating (git installs)
 

@@ -20,12 +20,13 @@ Installed from git:
 omarchy plugin update io.github.macifyer.pallet
 ```
 
-Symlinked for development (recommended while hacking):
+Developing (the plugin directory IS the checkout — validators reject symlinks):
 
 ```sh
-ln -s ~/Projects/pallet ~/.config/omarchy/plugins/io.github.macifyer.pallet
+git clone git@github.com:macifyer/pallet.git \
+    ~/.config/omarchy/plugins/io.github.macifyer.pallet
 omarchy-shell shell rescanPlugins && omarchy plugin enable io.github.macifyer.pallet
-# from then on: git pull; the shell auto-reloads on save
+# edit and commit in that directory; the shell auto-reloads on save
 ```
 
 See docs/PLUGIN.md for the lifecycle contract, validation, and publish checklist. Standalone development (any Quickshell setup) is covered in shell/README.md.
