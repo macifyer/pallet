@@ -1,39 +1,55 @@
 # Pallet
 
-A keyboard-driven command palette for Arch/Hyprland built on Quickshell. Summon it, type, act — applications, windows, calculation, script commands, and the focused application's own menu items via AT-SPI.
+A keyboard-driven command palette for Omarchy on Arch/Hyprland, built on Quickshell. Summon it, type, act — applications, windows, calculation, script commands, and the focused application's own menu items via AT-SPI.
 
-**Status:** scaffold. Architecture designed, implementation beginning.
+**Status:** early but daily-drivable. App search, fuzzy ranking, theme icons, and focused-app menu search work; more providers land next.
+
+## Install (Omarchy Quattro)
+
+```sh
+omarchy plugin add https://github.com/macifyer/pallet.git --enable
+```
+
+Then bind a key in `hyprland.conf`:
+
+```
+bind = SUPER, K, exec, omarchy-shell shell summon io.github.macifyer.pallet '{}'
+```
+
+See docs/PLUGIN.md for development against the real shell and the publish checklist. Standalone development (any Quickshell setup) is covered in shell/README.md.
 
 ## Stack
 
 - **Frontend:** Quickshell / QML
 - **Core (prototype):** Python, JSON over stdio
 - **Compositor:** Hyprland (windows, focus, runtime keybindings via `hyprctl eval`)
-- **Optional adapter:** Omarchy (theming, commands)
+- **Integration:** Omarchy shell plugin (kind: overlay)
 
 ## Layout
 
 ```
-shell/      Quickshell QML (window, search, results, action panel)
-src/        Python core (registry, ranking, settings)
-providers/  One directory per provider
-adapters/   hyprland/ and optional omarchy/
-docs/       architecture + provider protocol
+manifest.json    Omarchy plugin contract (overlay kind)
+PalletOverlay.qml  plugin entry point (summon/hide -> open/close)
+shell/           Quickshell QML (window, search, results, actions)
+src/             Python core (provider host: fanout, merge, cancel)
+providers/       One directory per provider (apps, menus, ...)
+docs/            architecture + provider protocol + plugin guide
 ```
 
 ## Milestones
 
-1. The loop — shortcut, search, ranked results, select, execute, close (apps, calculator, one script provider)
+1. ~~The loop~~ — shortcut, search, ranked results, select, execute, close
 2. Action panel — open / copy / reveal / alternate actions
-3. Menu search — focused app menus via AT-SPI (port of MaNi4's walker, MIT)
+3. ~~Menu search~~ — focused app menus via AT-SPI (port of MaNi4's walker, MIT); deeper coverage next
 4. Persistent tools — clipboard history, snippets, timers, file search
-5. Provider SDK — templates, installation, diagnostics
+5. Hyprland + Omarchy providers — window switching, system actions, packages
 6. Workflows and AI — reviewable, confirmable actions
 
 ## Security posture
 
 - Providers run as subprocesses with declared commands; never unrestricted QML plugins.
 - Search text is never executed as a shell command.
+- Privileged or destructive actions get visible confirmation; nothing silent with sudo.
 - Clipboard storage is opt-in with explicit controls.
 - AI proposes actions; humans confirm them.
 

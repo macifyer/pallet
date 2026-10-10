@@ -3,16 +3,23 @@ import Quickshell
 import Quickshell.Io
 
 // Speaks the provider protocol (docs/PROVIDERS.md) to the core host over
-// NDJSON stdio. The host (src/host.py) does not exist yet — the next M1
-// step — so until then the UI surfaces its absence instead of pretending.
+// NDJSON stdio.
 Process {
     id: root
 
     signal resultsReady(var results)
     signal hostError(string message)
 
+    // Resolved relative to THIS file, so it finds the repo's src/host.py
+    // both standalone (qs -p shell) and as an Omarchy plugin, where
+    // Quickshell.shellDir points at omarchy-shell's directory instead.
+    readonly property url hostUrl: Qt.resolvedUrl("../src/host.py")
+    readonly property string localHostPath: {
+        const text = hostUrl.toString();
+        return text.startsWith("file://") ? text.substring(7) : text;
+    }
     readonly property string hostPath: Quickshell.env("PALLET_HOST")
-        ?? (Quickshell.shellDir + "/../src/host.py")
+        ?? localHostPath
 
     property int queryCounter: 0
 

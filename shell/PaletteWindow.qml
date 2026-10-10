@@ -14,6 +14,10 @@ PanelWindow {
     property int selectedIndex: 0
     property var filtered: []
 
+    // Omarchy plugin contract: summon/hide route to open()/close(),
+    // and the shell may read `opened` for lifecycle state.
+    readonly property bool opened: visible
+
     visible: false
     focusable: true
     color: "transparent"
@@ -138,11 +142,22 @@ PanelWindow {
             searchInput.forceActiveFocus();
     }
 
+    function open(): void {
+        visible = true;
+    }
+
     function close(): void {
         visible = false;
         searchInput.text = "";
         root.filtered = [];
         root.selectedIndex = 0;
+    }
+
+    function toggle(): void {
+        if (visible)
+            close();
+        else
+            open();
     }
 
     function runSearch(): void {
