@@ -21,7 +21,7 @@ development.)
 
 ## The hotkey (service kind)
 
-`PalletService.qml` registers `ALT+SPACE -> omarchy-shell shell toggle
+`Service.qml` registers `ALT+SPACE -> omarchy-shell shell toggle
 io.github.macifyer.pallet` at runtime via `hyprctl keyword bindd`, after the
 pattern of MaNi4's plugin:
 
@@ -51,6 +51,27 @@ omarchy plugin enable io.github.macifyer.pallet
 Edit, commit, and push from that directory. The shell auto-reloads on save,
 and `git pull` there is the update loop. A separate clone elsewhere (e.g.
 ~/Projects/pallet) is only useful for standalone `qs -p shell` testing.
+
+## Troubleshooting
+
+- **Never run `omarchy plugin remove` with your terminal cd'd inside the
+  plugin dir.** The removal deletes your cwd; every later command in that
+  shell dies with `getcwd: cannot access parent directories`. `cd ~` first.
+- **"File name case mismatch" on a correctly-cased file** — Quickshell's
+  runtime cache can go stale when plugin files churn (git pulls, remove/add
+  cycles). Clear it and rescan:
+
+  ```sh
+  rm -rf ~/.cache/quickshell
+  omarchy-shell shell rescanPlugins
+  ```
+
+- **Entry point naming** — service entry points are named `Service.qml` by
+  convention (first-party plugins and MaNi4's working plugin alike). We hit a
+  service-load failure with a custom name; the conventional name is what we
+  ship.
+- **Fresh reinstall:** `omarchy plugin remove io.github.macifyer.pallet`,
+  then `omarchy plugin add <url> --enable` (from a sane cwd).
 
 ## Updating (git installs)
 
