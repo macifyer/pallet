@@ -1,0 +1,7 @@
+{
+  "name": "template",
+  "description": "Copy me to start a new provider",
+  "exec": ["python3", "providers/_template/provider.py"],
+  "triggers": [],
+  "capabilities": ["search"]
+}
