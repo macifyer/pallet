@@ -10,30 +10,43 @@ A keyboard-driven command palette for Omarchy on Arch/Hyprland, built on Quicksh
 omarchy plugin add https://github.com/macifyer/pallet.git --enable
 ```
 
-Then bind a key in `hyprland.conf`:
+That's it — Pallet registers its own hotkey: ALT+SPACE toggles the palette, leaving SUPER+SPACE on the built-in Omarchy menu. If ALT+SPACE is already bound on your system, Pallet logs a warning in the shell log instead of overriding it; bind `omarchy-shell shell toggle io.github.macifyer.pallet` to a key of your choice in that case.
 
-```
-bind = SUPER, K, exec, omarchy-shell shell summon io.github.macifyer.pallet '{}'
+## Update
+
+Installed from git:
+
+```sh
+omarchy plugin update io.github.macifyer.pallet
 ```
 
-See docs/PLUGIN.md for development against the real shell and the publish checklist. Standalone development (any Quickshell setup) is covered in shell/README.md.
+Symlinked for development (recommended while hacking):
+
+```sh
+ln -s ~/Projects/pallet ~/.config/omarchy/plugins/io.github.macifyer.pallet
+omarchy-shell shell rescanPlugins && omarchy plugin enable io.github.macifyer.pallet
+# from then on: git pull; the shell auto-reloads on save
+```
+
+See docs/PLUGIN.md for the lifecycle contract, validation, and publish checklist. Standalone development (any Quickshell setup) is covered in shell/README.md.
 
 ## Stack
 
 - **Frontend:** Quickshell / QML
 - **Core (prototype):** Python, JSON over stdio
 - **Compositor:** Hyprland (windows, focus, runtime keybindings via `hyprctl eval`)
-- **Integration:** Omarchy shell plugin (kind: overlay)
+- **Integration:** Omarchy shell plugin (kinds: overlay + service)
 
 ## Layout
 
 ```
-manifest.json    Omarchy plugin contract (overlay kind)
-PalletOverlay.qml  plugin entry point (summon/hide -> open/close)
-shell/           Quickshell QML (window, search, results, actions)
-src/             Python core (provider host: fanout, merge, cancel)
-providers/       One directory per provider (apps, menus, ...)
-docs/            architecture + provider protocol + plugin guide
+manifest.json      Omarchy plugin contract
+PalletOverlay.qml  overlay entry point (summon/hide -> open/close)
+PalletService.qml  service entry point (self-registering ALT+SPACE hotkey)
+shell/             Quickshell QML (window, search, results, actions)
+src/               Python core (provider host: fanout, merge, cancel)
+providers/         One directory per provider (apps, menus, ...)
+docs/              architecture + provider protocol + plugin guide
 ```
 
 ## Milestones
@@ -55,6 +68,6 @@ docs/            architecture + provider protocol + plugin guide
 
 ## Credits
 
-- [MaNi4/omarchy-search-menu-items](https://github.com/MaNi4/omarchy-search-menu-items) (MIT) — AT-SPI menu walking and pure-model test pattern
+- [MaNi4/omarchy-search-menu-items](https://github.com/MaNi4/omarchy-search-menu-items) (MIT) — AT-SPI menu walking, hotkey registration pattern, and pure-model test pattern
 - [bjarneo/omarchy-shell-plugins](https://github.com/bjarneo/omarchy-shell-plugins) (MIT) — Omni palette reference
 - Raycast, Vicinae, Wox, Ueli — inspiration only (Vicinae is GPL-3.0; its code is not used)

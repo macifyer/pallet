@@ -1,8 +1,9 @@
 # Pallet as an Omarchy plugin
 
-Pallet is an Omarchy Quattro shell plugin of kind `overlay`. The contract is a
-root `manifest.json` plus a QML entry point per kind; validation is the same
-check the shell runs at load: `omarchy plugin validate <path>`.
+Pallet is an Omarchy Quattro shell plugin with two kinds: `overlay` (the
+palette window) and `service` (hotkey registration). The contract is a root
+`manifest.json` plus a QML entry point per kind; validation is the same check
+the shell runs at load: `omarchy plugin validate <path>`.
 
 ## Lifecycle contract
 
@@ -10,12 +11,29 @@ check the shell runs at load: `omarchy plugin validate <path>`.
 |---|---|
 | `omarchy-shell shell summon io.github.macifyer.pallet '{}'` | `PalletOverlay.qml -> open()` |
 | `omarchy-shell shell hide io.github.macifyer.pallet` | `PalletOverlay.qml -> close()` |
+| `omarchy-shell shell toggle io.github.macifyer.pallet` | `PalletOverlay.qml -> toggle()` |
 
-`keepLoaded: true` keeps the component alive so the Python host process
+`keepLoaded: true` keeps both components alive so the Python host process
 spawned by `ProviderBridge` stays warm between summons. As a plugin, Pallet
 runs inside the long-lived omarchy-shell process — never start a second
 Quickshell instance for it. (`qs -p shell` remains for standalone, non-Omarchy
 development.)
+
+## The hotkey (service kind)
+
+`PalletService.qml` registers `ALT+SPACE -> omarchy-shell shell toggle
+io.github.macifyer.pallet` at runtime via `hyprctl keyword bindd`, after the
+pattern of MaNi4's plugin:
+
+- Existing binds are read first (`hyprctl binds -j`). If ALT+SPACE is taken,
+  Pallet logs a warning and does not override it; bind the toggle yourself.
+- Our binding is identified by its description (`Pallet command palette`), so
+  re-registration never duplicates it.
+- Hyprland drops runtime bindings on `hyprctl reload`. A socket2 watcher
+  (`configreloaded`) re-asserts the bind. This needs `socat`; without it the
+  bind vanishes on reload until the plugin reloads.
+- Disabling/removing the plugin destroys the service, which unbinds the combo
+  it registered.
 
 ## Develop against the real shell
 
@@ -28,19 +46,13 @@ omarchy plugin enable io.github.macifyer.pallet
 
 The plugin directory may itself be a symlink (removal unlinks it); no symlinks
 are allowed inside the folder. Saving files under the plugins directory
-auto-reloads the plugin.
+auto-reloads the plugin — so the dev update loop is just `git pull`.
 
-## Bind it
+## Updating (git installs)
 
-`hyprland.conf`:
-
+```sh
+omarchy plugin update io.github.macifyer.pallet
 ```
-bind = SUPER, K, exec, omarchy-shell shell summon io.github.macifyer.pallet '{}'
-```
-
-Esc or a backdrop click closes it. A MaNi4-style self-registering runtime
-binding (a `service` kind using `hyprctl eval`) is a planned upgrade, which is
-why the manifest does not declare `service` yet.
 
 ## Inspect
 
@@ -49,9 +61,20 @@ omarchy plugin list --json | jq '.[] | select(.id == "io.github.macifyer.pallet"
 qs log -p "$OMARCHY_PATH/shell" --tail 100
 ```
 
+Look for `pallet: ALT+SPACE -> omarchy-shell shell toggle ...` to confirm the
+service bound the key, or the conflict warning if it refused.
+
 ## Publish checklist
 
-- Public git repo; manifest keeps `id: io.github.macifyer.pallet`
+- Flip the repo public (required for `omarchy plugin add <url>` to work for
+  anyone but you):
+
+  ```sh
+  gh repo edit macifyer/pallet --visibility public --accept-visibility-change-consequences
+  gh repo edit macifyer/pallet --add-topic omarchy --add-topic omarchy-plugin \
+      --add-topic quickshell --add-topic hyprland --add-topic launcher
+  ```
+
 - README, LICENSE, optional `preview.png` at repo root
 - `omarchy plugin validate .` clean
 - Submit the listing; installs are `omarchy plugin add <git-url> --enable`
