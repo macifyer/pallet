@@ -3,10 +3,18 @@
 
 Advisory-scored results; final ordering happens in the frontend's Fuzzy.rank.
 Launch actions are raw argv arrays — never shell strings.
+
+Entries are skipped when their binary cannot be resolved: TryExec when the
+file declares it (per the freedesktop spec), otherwise the Exec argv[0].
+This hides the .desktop debris an uninstall leaves behind — pacman removes
+tracked files, but user-level entries (Wine, AppImages, web-app shortcuts)
+survive the death of the binary they point at.
 """
 
 import json
+import os
 import shlex
+import shutil
 import sys
 from pathlib import Path
 
@@ -23,6 +31,15 @@ XDG_DIRS = [
 FIELD_MARK = "%"
 
 MAX_RESULTS = 15
+
+
+def resolves(token: str) -> bool:
+    """Whether an executable token names a runnable program."""
+    if not token:
+        return False
+    if "/" in token:
+        return os.access(token, os.X_OK)
+    return shutil.which(token) is not None
 
 
 def split_exec(exec_line: str) -> list[str]:
@@ -61,6 +78,15 @@ def parse_desktop(path: Path) -> dict | None:
         return None
     if lowered.get("terminal") == "true":
         return None  # needs a terminal wrapper; out of M1 scope
+
+    # Ghost filter: honor TryExec per spec; then require the Exec binary
+    # itself to resolve. Wrappers like `env` or `flatpak` resolve fine;
+    # binaries removed by an uninstall do not.
+    try_exec = fields.get("TryExec", "")
+    if try_exec and not resolves(try_exec):
+        return None
+    if not resolves(argv[0]):
+        return None
 
     return {
         "name": name,
@@ -143,6 +169,8 @@ def main() -> None:
             print(json.dumps({"id": msg.get("id", ""), "results": results}), flush=True)
         elif msg.get("op") == "cancel":
             print(json.dumps({"id": msg.get("target", ""), "cancelled": True}), flush=True)
+        elif msg.get("op") == "execute":
+            print(json.dumps({"id": msg.get("id", ""), "executed": False}), flush=True)
 
 
 if __name__ == "__main__":
