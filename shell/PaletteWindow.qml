@@ -13,6 +13,7 @@ PanelWindow {
 
     property int selectedIndex: 0
     property var filtered: []
+    property bool panelOpen: false
 
     // Omarchy plugin contract: summon/hide route to open()/close(),
     // and the shell may read `opened` for lifecycle state.
@@ -85,6 +86,7 @@ PanelWindow {
                 Keys.onEscapePressed: root.close()
                 Keys.onDownPressed: root.moveSelection(1)
                 Keys.onUpPressed: root.moveSelection(-1)
+                Keys.onTabPressed: root.togglePanel()
             }
 
             Rectangle {
@@ -109,8 +111,27 @@ PanelWindow {
                 Layout.fillWidth: true
                 font.pixelSize: 11
                 color: "#585b70"
-                text: qsTr("Up/Down navigate \u00b7 Enter runs \u00b7 Esc closes")
+                text: root.panelOpen
+                    ? qsTr("Up/Down navigate \u00b7 Enter runs \u00b7 Esc closes panel")
+                    : qsTr("Up/Down navigate \u00b7 Enter runs \u00b7 Tab actions \u00b7 Esc closes")
             }
+        }
+    }
+
+    ActionPanel {
+        id: actionPanel
+
+        anchors.left: box.right
+        anchors.leftMargin: 12
+        anchors.top: box.top
+        anchors.topMargin: 0
+
+        visible: root.panelOpen
+        result: root.filtered[root.selectedIndex]
+
+        onActionExecuted: (action, result) => {
+            bridge.execute(action, result);
+            root.close();
         }
     }
 
@@ -140,6 +161,8 @@ PanelWindow {
     onVisibleChanged: {
         if (visible)
             searchInput.forceActiveFocus();
+        else
+            root.panelOpen = false;
     }
 
     function open(): void {
@@ -147,10 +170,15 @@ PanelWindow {
     }
 
     function close(): void {
+        if (root.panelOpen) {
+            root.panelOpen = false;
+            return;
+        }
         visible = false;
         searchInput.text = "";
         root.filtered = [];
         root.selectedIndex = 0;
+        root.panelOpen = false;
     }
 
     function toggle(): void {
@@ -164,18 +192,36 @@ PanelWindow {
         const q = searchInput.text.trim();
         if (q.length === 0) {
             root.filtered = [];
+            root.panelOpen = false;
             return;
         }
         bridge.search(q);
     }
 
     function moveSelection(step: int): void {
+        if (root.panelOpen) {
+            actionPanel.moveAction(step);
+            return;
+        }
         if (root.filtered.length === 0)
             return;
         root.selectedIndex = (root.selectedIndex + step + root.filtered.length) % root.filtered.length;
     }
 
+    function togglePanel(): void {
+        if (root.filtered.length === 0)
+            return;
+        const item = root.filtered[root.selectedIndex];
+        if (!item || !item.actions || item.actions.length === 0)
+            return;
+        root.panelOpen = !root.panelOpen;
+    }
+
     function executeSelection(): void {
+        if (root.panelOpen) {
+            actionPanel.executeCurrent();
+            return;
+        }
         const item = root.filtered[root.selectedIndex];
         if (item === undefined || item.actions === undefined || item.actions.length === 0)
             return;
