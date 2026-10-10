@@ -47,11 +47,11 @@ Process {
 
     function search(query: string): void {
         root.queryCounter += 1;
-        root.writeLn(JSON.stringify({
+        root.write(JSON.stringify({
             id: "q" + root.queryCounter,
             op: "search",
             query: query
-        }));
+        }) + "\n");
     }
 
     function execute(action: var): void {
