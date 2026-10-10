@@ -3,8 +3,8 @@ import Quickshell
 import Quickshell.Io
 
 // Speaks the provider protocol (docs/PROVIDERS.md) to the core host over
-// NDJSON stdio. The host (src/host.py) does not exist yet \u2014 the next M1
-// step \u2014 so until then the UI surfaces its absence instead of pretending.
+// NDJSON stdio. The host (src/host.py) does not exist yet — the next M1
+// step — so until then the UI surfaces its absence instead of pretending.
 Process {
     id: root
 
@@ -12,7 +12,7 @@ Process {
     signal hostError(string message)
 
     readonly property string hostPath: Quickshell.env("PALLET_HOST")
-        ?? (Quickshell.shellRoot + "/../src/host.py")
+        ?? (Quickshell.shellDir + "/../src/host.py")
 
     property int queryCounter: 0
 
