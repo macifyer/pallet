@@ -54,7 +54,7 @@ Process {
         }) + "\n");
     }
 
-    function execute(action: var): void {
+    function execute(action: var, result: var): void {
         if (action === undefined || action === null)
             return;
         switch (action.type) {
@@ -68,8 +68,12 @@ Process {
             Quickshell.execDetached(["wl-copy", action.text]);
             break;
         case "custom":
-            // M2: forward to the owning provider for handling.
-            console.warn("pallet: custom action not yet implemented", JSON.stringify(action));
+            root.write(JSON.stringify({
+                id: "a" + root.queryCounter,
+                op: "execute",
+                provider: result.provider || "",
+                action: action
+            }) + "\n");
             break;
         }
     }

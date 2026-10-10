@@ -7,7 +7,8 @@ Owns provider subprocesses and the query lifecycle the QML frontend drives:
     QML bridge <--NDJSON-- host <--NDJSON (merge)--- providers
 
 The protocol is defined in docs/PROVIDERS.md; this file is transport.
-stdout belongs to the protocol; stderr belongs to host diagnostics.
+stdout belongs to the provider-worker messages; provider stderr is mirrored
+with a prefix.
 """
 
 from __future__ import annotations
@@ -149,6 +150,16 @@ class Host:
         else:
             await self.broadcast(msg)
 
+    async def on_execute(self, msg: dict) -> None:
+        """A launch/copy/open action the frontend cannot do itself: send it
+        to the provider that authored the result."""
+        wanted = str(msg.get("provider", ""))
+        for provider in self.providers:
+            if provider.name == wanted:
+                await provider.send({"id": msg.get("id", ""), "op": "execute", "action": msg.get("action")})
+                return
+        log(f"execute: no provider {wanted!r}")
+
     async def _merge(self, qid: str) -> None:
         """Collect the first response from each live provider, within budget."""
         pending = {p.name for p in self.providers if p.alive}
@@ -181,7 +192,7 @@ class Host:
 
 
 async def read_client(host: Host) -> None:
-    """stdin from the QML bridge: search / cancel ops, one JSON object per line."""
+    """stdin from the QML bridge: search / cancel / execute ops, one JSON object per line."""
     loop = asyncio.get_running_loop()
     reader = asyncio.StreamReader(limit=1 << 16)
     await loop.connect_read_pipe(
@@ -201,6 +212,8 @@ async def read_client(host: Host) -> None:
             await host.on_search(msg)
         elif op == "cancel":
             await host.on_cancel(msg)
+        elif op == "execute":
+            await host.on_execute(msg)
         else:
             log(f"unknown op {op!r}")
 

@@ -14,6 +14,8 @@ A provider is a subprocess speaking newline-delimited JSON over stdio. It is nev
 }
 ```
 
+`capabilities` advertises `search` and, for providers that can act on their own results after the fact, `execute`.
+
 ## Messages
 
 Host to provider:
@@ -21,6 +23,7 @@ Host to provider:
 ```json
 {"id": "q1", "op": "search", "query": "fire"}
 {"id": "q2", "op": "cancel", "target": "q1"}
+{"id": "a1", "op": "execute", "action": {"type": "custom", "id": 12}}
 ```
 
 Provider to host:
@@ -39,19 +42,22 @@ Provider to host:
     ]
   }
 ]}
+{"id": "a1", "executed": true}
 ```
+
+The `execute` op goes only to the provider that authored the result: the host tags each result with its provider name during merge (overriding nothing already set), and the frontend includes that name when it asks for a `custom` action to run.
 
 ## Action types
 
-- `launch` — argv array, executed directly, no shell
-- `copy` — put text on the clipboard
-- `open` — url via xdg-open
-- `custom` — provider-scoped identifier, handled by the provider in a follow-up request
+- `launch` — argv array, executed directly by the frontend, no shell
+- `copy` — put text on the clipboard (frontend)
+- `open` — url via xdg-open (frontend)
+- `custom` — provider-defined payload; the frontend sends it back to the owning provider with op `execute` (menu presses, toggles, anything needing provider-side handles)
 
 ## Rules
 
 1. argv is executed without a shell. No string interpolation into shell commands, ever.
 2. Cancellation is cooperative: on cancel, stop work and emit a cancelled reply for the target id.
-3. Provider scores are advisory; the host applies its own ranking (history, recency, fuzzy match).
+3. Provider scores are advisory; the host applies its own merge, the frontend its own fuzzy pass.
 4. Respond within 150 ms or stream partial results; the host cancels stale queries when input changes.
 5. A manifest declares every executable the provider may run; undeclared executions are bugs.

@@ -1,0 +1,7 @@
+{
+  "name": "menus",
+  "description": "Search and run the focused app's menu items (AT-SPI). Adapted from MaNi4 (MIT). Requires python-gobject and AT-SPI enabled.",
+  "exec": ["python3", "providers/menus/provider.py"],
+  "triggers": [],
+  "capabilities": ["search", "execute"]
+}

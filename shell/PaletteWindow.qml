@@ -164,7 +164,7 @@ PanelWindow {
         const item = root.filtered[root.selectedIndex];
         if (item === undefined || item.actions === undefined || item.actions.length === 0)
             return;
-        bridge.execute(item.actions[0]);
+        bridge.execute(item.actions[0], item);
         root.close();
     }
 }
