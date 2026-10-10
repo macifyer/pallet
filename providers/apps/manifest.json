@@ -1,0 +1,7 @@
+{
+  "name": "apps",
+  "description": "Search installed applications (.desktop entries)",
+  "exec": ["python3", "providers/apps/provider.py"],
+  "triggers": [],
+  "capabilities": ["search"]
+}
