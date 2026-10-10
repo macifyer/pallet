@@ -1,31 +1,68 @@
 import QtQuick
+import Quickshell
 
 Rectangle {
     id: root
 
     required property var modelData
 
+    // Freedesktop icon resolution (spec-compliant lookup order):
+    //   1. absolute path in the .desktop entry -> file:// directly
+    //   2. active icon theme via Quickshell.iconPath (explicit-fallback mode,
+    //      so a miss returns "" instead of a junk path)
+    //   3. nothing -> the fallback glyph
+    readonly property string iconSource: {
+        const icon = root.modelData.icon ?? "";
+        if (icon.length === 0)
+            return "";
+        if (icon.indexOf("/") !== -1)
+            return "file://" + icon;
+        return Quickshell.iconPath(icon, true);
+    }
+
     width: ListView.view ? ListView.view.width : 0
     height: 44
     radius: 8
     color: ListView.isCurrentItem ? "#313244" : "transparent"
 
-    Text {
-        id: icon
+    Image {
+        id: appIcon
 
         anchors.left: parent.left
         anchors.leftMargin: 14
         anchors.verticalCenter: parent.verticalCenter
 
-        text: root.modelData.icon ? "\u25c6" : "\u25c7"
+        width: 22
+        height: 22
+        visible: root.iconSource.length > 0
+        source: root.iconSource
+        sourceSize: Qt.size(22, 22)
+        smooth: true
+        mipmap: true
+        asynchronous: true
+    }
+
+    Text {
+        id: fallbackIcon
+
+        anchors.left: parent.left
+        anchors.leftMargin: 14
+        anchors.verticalCenter: parent.verticalCenter
+        width: iconImgWidth
+
+        readonly property int iconImgWidth: 22
+
+        visible: !appIcon.visible
+        text: "\u25c6"
         color: "#89b4fa"
         font.pixelSize: 13
+        font.bold: true
     }
 
     Text {
         id: title
 
-        anchors.left: icon.right
+        anchors.left: appIcon.right
         anchors.leftMargin: 12
         anchors.verticalCenter: parent.verticalCenter
 
