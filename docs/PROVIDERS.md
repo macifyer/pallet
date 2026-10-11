@@ -19,7 +19,8 @@ The host tags merged results with their provider name; custom actions route only
 
 - `title`, `subtitle`, `icon` — display fields.
 - `keywords` — optional space-separated aliases matched by the frontend fuzzy pass.
-- `fallbackIcon`, `fallbackColor` — optional glyph/color used only when `icon` cannot be resolved in the active theme.
+- `icons` — optional ordered candidate list of icon names/absolute paths. The frontend resolves the first entry that exists in the active theme; use it so results survive arbitrary icon themes.
+- `fallbackIcon`, `fallbackColor` — optional glyph/color used only when every icon candidate misses.
 - `score` — advisory 0..1; blended with the frontend fuzzy score.
 - `provider` — set by the host during merge.
 
@@ -27,7 +28,7 @@ The host tags merged results with their provider name; custom actions route only
 
 - `launch` — argv array, executed directly by the frontend, no shell
 - `copy` — put text on the clipboard (frontend)
-- `open` — url via xdg-open (frontend)
+- `open` — path or url via xdg-open (frontend)
 - `custom` — provider-defined payload sent back to the owning provider
 
 ## Action metadata
@@ -44,8 +45,8 @@ The host tags merged results with their provider name; custom actions route only
 ```
 
 - `title` — preferred panel label.
-- `danger: "confirm"` — requires a second Enter on the confirmation sheet; it is behavioral, independent of visual tone.
-- `tone` — optional visual meaning for confirmation-gated actions: `positive` (green), `warning` (amber), or `danger` (red). Omit it for the backward-compatible amber warning tone.
+- `danger: "confirm"` — requires a second Enter on the confirmation sheet; behavioral, independent of visual tone.
+- `tone` — optional visual meaning for confirmation-gated actions: `positive` (green), `warning` (amber), or `danger` (red).
 - `confirmation.title` / `confirmation.detail` — text shown in the sheet.
 
 ## Rules
