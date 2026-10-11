@@ -4,6 +4,10 @@
 Window addresses come from hyprctl clients -j and are treated as ephemeral
 capabilities: every action re-reads clients and refuses unknown addresses.
 All hyprctl calls are explicit argv arrays; no shell is involved.
+
+Dispatching is Lua-era (Hyprland 0.55+): hyprctl dispatch wraps its argument
+as hl.dispatch(<arg>), so every call is a hl.dsp.* dispatcher-object
+expression. Legacy string dispatcher syntax was removed with hyprlang.
 """
 
 from __future__ import annotations
@@ -29,13 +33,18 @@ def hyprctl_json(*args: str) -> Any:
         return None
 
 
-def dispatch(name: str, argument: str = "") -> bool:
+def eval_dispatch(builder: str) -> bool:
+    """Feed a hl.dsp.* dispatcher-object expression to hyprctl dispatch.
+
+    The compositor replies with the text "ok" on success and an error
+    message on failure, so both the exit code and the reply are checked.
+    """
     try:
         result = subprocess.run(
-            ["hyprctl", "dispatch", name, argument],
+            ["hyprctl", "dispatch", builder],
             check=False, capture_output=True, text=True, timeout=2,
         )
-        return result.returncode == 0
+        return result.returncode == 0 and result.stdout.strip().startswith("ok")
     except (OSError, subprocess.TimeoutExpired):
         return False
 
@@ -126,18 +135,18 @@ def execute(action: dict) -> bool:
     address = action.get("address")
     if not resolve_live(address):
         return False
-    selector = "address:" + address
+    # Lua snippets are built from a regex-validated hex address and fixed
+    # kind constants — search text and window titles never reach them.
+    selector = f'window = "address:{address}"'
     kind = action.get("kind")
     if kind == "focus-window":
-        return dispatch("focuswindow", selector)
+        return eval_dispatch(f"hl.dsp.focus({{ {selector} }})")
     if kind == "close-window":
-        return dispatch("closewindow", selector)
+        return eval_dispatch(f"hl.dsp.window.close({{ {selector} }})")
     if kind == "toggle-floating":
-        return dispatch("togglefloating", selector)
+        return eval_dispatch(f'hl.dsp.window.float({{ action = "toggle", {selector} }})')
     if kind == "toggle-fullscreen":
-        # fullscreen historically targets the focused window, so focus the
-        # exact selected window first, then toggle normal fullscreen mode.
-        return dispatch("focuswindow", selector) and dispatch("fullscreen", "0")
+        return eval_dispatch(f'hl.dsp.window.fullscreen({{ mode = "fullscreen", action = "toggle", {selector} }})')
     return False
 
 

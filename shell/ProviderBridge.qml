@@ -9,6 +9,9 @@ Process {
 
     signal resultsReady(var results)
     signal hostError(string message)
+    // A provider refused or failed to run a custom action (stale window,
+    // dispatcher error, ...). The reply carries no detail beyond the id.
+    signal actionFailed()
 
     // Resolved relative to THIS file, so it finds the repo's src/host.py
     // both standalone (qs -p shell) and as an Omarchy plugin, where
@@ -40,6 +43,8 @@ Process {
                 root.resultsReady(msg.results);
             else if (msg.error !== undefined)
                 root.hostError(msg.error);
+            else if (msg.executed === false)
+                root.actionFailed();
         }
     }
 

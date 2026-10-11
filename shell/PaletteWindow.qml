@@ -14,6 +14,9 @@ PanelWindow {
     property int selectedIndex: 0
     property var filtered: []
     property bool panelOpen: false
+    // Transient failure notice shown in the footer (e.g. a provider
+    // refused an action). Cleared by flashTimer or on close.
+    property string flashMessage: ""
 
     // Omarchy plugin contract: summon/hide route to open()/close(),
     // and the shell may read `opened` for lifecycle state.
@@ -110,10 +113,12 @@ PanelWindow {
             Text {
                 Layout.fillWidth: true
                 font.pixelSize: 11
-                color: "#585b70"
-                text: root.panelOpen
-                    ? qsTr("Up/Down navigate \u00b7 Enter runs \u00b7 Esc closes panel")
-                    : qsTr("Up/Down navigate \u00b7 Enter runs \u00b7 Tab actions \u00b7 Esc closes")
+                color: root.flashMessage.length > 0 ? "#f38ba8" : "#585b70"
+                text: root.flashMessage.length > 0
+                    ? root.flashMessage
+                    : (root.panelOpen
+                        ? qsTr("Up/Down navigate \u00b7 Enter runs \u00b7 Esc closes panel")
+                        : qsTr("Up/Down navigate \u00b7 Enter runs \u00b7 Tab actions \u00b7 Esc closes"))
             }
         }
     }
@@ -150,12 +155,22 @@ PanelWindow {
                 actions: []
             }];
         }
+        onActionFailed: {
+            root.flashMessage = qsTr("That action could not be completed \u2014 the target may already be gone.");
+            flashTimer.restart();
+        }
     }
 
     Timer {
         id: debounce
         interval: 80
         onTriggered: root.runSearch()
+    }
+
+    Timer {
+        id: flashTimer
+        interval: 2500
+        onTriggered: root.flashMessage = ""
     }
 
     onVisibleChanged: {
@@ -179,6 +194,7 @@ PanelWindow {
         root.filtered = [];
         root.selectedIndex = 0;
         root.panelOpen = false;
+        root.flashMessage = "";
     }
 
     function toggle(): void {
