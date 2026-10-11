@@ -6,6 +6,11 @@ provider's own exclude list verbatim), otherwise os.walk with the same
 names pruned. It refreshes lazily after INDEX_TTL_S of staleness. Search
 scores basename first, then path components, and nudges recent files up.
 
+Text/code files gain an Open-in-editor action: $VISUAL/$EDITOR wins; GUI
+editors launch directly, terminal editors via foot -e. xdg-open remains the
+default Open — some desktops attach plain text to odd handlers like
+browsers.
+
 Actions are plain launch/open argv; no custom execute capability is needed.
 """
 
@@ -13,6 +18,7 @@ from __future__ import annotations
 
 import json
 import os
+import shlex
 import shutil
 import subprocess
 import sys
@@ -33,6 +39,9 @@ PRUNE = {
     ".npm", ".rustup", ".cargo", ".mozilla", ".config/chromium",
     ".local/share/Trash", "vendor/bundle", "dist-newstyle",
 }
+
+GUI_EDITORS = ("code", "codium", "zed", "kate", "subl", "gedit", "mousepad")
+TERM_EDITORS = ("hx", "helix", "nvim", "vim", "nano", "emacs")
 
 ICON_BY_SUFFIX: dict[str, str] = {
     ".png": "image-x-generic", ".jpg": "image-x-generic", ".jpeg": "image-x-generic",
@@ -121,6 +130,37 @@ def icon_for(path: str, is_dir: bool) -> str:
     return ICON_BY_SUFFIX.get(suffix, "text-x-generic")
 
 
+def is_text_like(is_dir: bool, path: str) -> bool:
+    if is_dir:
+        return False
+    suffix = Path(path).suffix.lower()
+    icon = ICON_BY_SUFFIX.get(suffix, "")
+    return icon.startswith("text-")
+
+
+def editor_argv(path: str) -> list[str] | None:
+    """$VISUAL/$EDITOR first; GUI editors direct, terminal editors via foot."""
+    explicit = os.environ.get("VISUAL") or os.environ.get("EDITOR") or ""
+    if explicit:
+        try:
+            cmd = shlex.split(explicit)
+        except ValueError:
+            cmd = explicit.split()
+        if not cmd:
+            return None
+        name = Path(cmd[0]).name
+        if name in GUI_EDITORS:
+            return cmd + [path]
+        return ["foot", "-e"] + cmd + [path]
+    for name in GUI_EDITORS:
+        if shutil.which(name):
+            return [name, path]
+    for name in TERM_EDITORS:
+        if shutil.which(name):
+            return ["foot", "-e", name, path]
+    return None
+
+
 def display_parent(rel: str) -> str:
     parent = str(Path(rel).parent)
     return "~/" + parent if parent != "." else "~/"
@@ -154,6 +194,10 @@ def actions_for(rel: str, is_dir: bool) -> list[dict]:
     if is_dir:
         actions.append({"type": "launch", "title": "Open terminal here", "argv": ["foot", "--working-directory", path]})
     else:
+        if is_text_like(is_dir, rel):
+            argv = editor_argv(path)
+            if argv:
+                actions.append({"type": "launch", "title": "Open in editor", "argv": argv})
         actions.append({"type": "open", "title": "Open containing folder", "url": parent})
         actions.append({"type": "launch", "title": "Open terminal here", "argv": ["foot", "--working-directory", parent]})
     actions.append({"type": "copy", "title": "Copy path", "text": path})

@@ -21,7 +21,13 @@ frontend fuzzy pass.
 
 | Result | Actions |
 |---|---|
-| File | Open (xdg-open) · Open containing folder · Open terminal here · Copy path |
+| File | Open (xdg-open/MIME default) · Open in editor* · Open containing folder · Open terminal here · Copy path |
 | Directory | Open (file manager) · Open terminal here · Copy path |
+
+*Open in editor appears for text/code files only: `$VISUAL`/`$EDITOR` is
+honored first (GUI editors launch directly, terminal editors are wrapped in
+`foot -e`), then a probed fallback list (Code/Zed/Kate before Helix/Neovim/Vim).
+The default Open stays xdg-open, since some machines attach `text/plain` to
+browsers.
 
 "Open terminal here" launches `foot --working-directory <dir>` as raw argv.
