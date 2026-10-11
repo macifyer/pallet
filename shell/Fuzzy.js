@@ -1,4 +1,4 @@
-// Pure logic \u2014 no Qt imports. Runnable under node for tests, following the
+// Pure logic — no Qt imports. Runnable under node for tests, following the
 // pattern of MaNi4's Model.js so ranking stays testable outside the UI.
 .pragma library
 
@@ -32,17 +32,27 @@ function matchScore(query, text) {
     return 0.4 + 0.3 * tight + 0.3 * earliness;
 }
 
+// File intent is explicit: paths and extension-like queries request files.
+// Ordinary terms such as "install" or "update" are command intent, even
+// when similarly named files happen to exist under $HOME.
+function isFileIntent(query) {
+    const q = String(query || "").trim();
+    return q.indexOf("/") !== -1 || q.indexOf("~") !== -1 || q.indexOf(".") !== -1;
+}
+
+function isExactFileQuery(query, result) {
+    return result.provider === "files"
+        && String(result.title || "").toLowerCase() === String(query || "").trim().toLowerCase();
+}
+
 // Client-side pass over merged provider results: drop non-matches, blend
-// fuzzy score with the provider's advisory score (0.7 / 0.3), sort desc.
-// The host ranks too; this pass exists so the the UI is correct against raw
-// provider output and the user's text always has the final vote.
-//
-// A result may carry an optional `keywords` string (space-separated
-// aliases). It is matched with the same subsequence scoring as title and
-// subtitle, so provider-side aliases like "sleep" -> "Suspend" survive
-// this pass instead of being silently dropped.
+// fuzzy score with the provider's advisory score (0.7 / 0.3), and sort.
+// Generic queries favor actionable non-file results over incidental filename
+// matches. Explicit file intent reverses that preference; exact filename
+// matches are always kept prominent.
 function rank(query, results) {
     const q = String(query || "").toLowerCase();
+    const wantsFile = isFileIntent(q);
     const scored = [];
     for (let i = 0; i < results.length; i++) {
         const r = results[i];
@@ -56,8 +66,16 @@ function rank(query, results) {
         const out = {};
         for (const key in r)
             out[key] = r[key];
+        const isFile = r.provider === "files";
+        let intentAdjustment = 0;
+        if (isExactFileQuery(q, r))
+            intentAdjustment = 0.22;
+        else if (wantsFile)
+            intentAdjustment = isFile ? 0.18 : -0.18;
+        else
+            intentAdjustment = isFile ? -0.18 : 0.18;
         out.fuzzy = best;
-        out.rank = 0.7 * best + 0.3 * advisory;
+        out.rank = 0.7 * best + 0.3 * advisory + intentAdjustment;
         scored.push(out);
     }
     scored.sort(function (a, b) { return b.rank - a.rank; });
