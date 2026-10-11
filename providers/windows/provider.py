@@ -5,6 +5,13 @@ Window addresses come from hyprctl clients -j and are treated as ephemeral
 capabilities: every action re-reads clients and refuses unknown addresses.
 All hyprctl calls are explicit argv arrays; no shell is involved.
 
+Icons resolve through .desktop entries, not wishful thinking: a startup map
+associates StartupWMClass, desktop-file stem, Name, and Exec basename with
+each entry's Icon (user dirs win over system dirs, per XDG precedence).
+Results emit the layered icon contract -- primary name, ordered `icons`
+candidates, `fallbackIcon` glyph -- so classes like "zen" (browser) pick up
+their declared app icon instead of rendering bare.
+
 Dispatching is Lua-era (Hyprland 0.55+): hyprctl dispatch wraps its argument
 as hl.dispatch(<arg>), so every call is a hl.dsp.* dispatcher-object
 expression. Legacy string dispatcher syntax was removed with hyprlang.
@@ -16,10 +23,61 @@ import json
 import re
 import subprocess
 import sys
+from pathlib import Path
 from typing import Any
 
 MAX_RESULTS = 15
 ADDRESS = re.compile(r"^0x[0-9a-fA-F]+$")
+
+XDG_APPS_DIRS = [
+    Path.home() / ".local/share/applications",
+    Path.home() / ".local/share/flatpak/exports/share/applications",
+    Path("/usr/local/share/applications"),
+    Path("/usr/share/applications"),
+    Path("/var/lib/flatpak/exports/share/applications"),
+]
+
+_icons: dict[str, str] = {}
+
+
+def load_icon_map() -> dict[str, str]:
+    """Associate window-class-ish tokens with declared desktop icons."""
+    mapping: dict[str, str] = {}
+    for directory in XDG_APPS_DIRS:
+        if not directory.is_dir():
+            continue
+        for desktop in sorted(directory.glob("*.desktop")):
+            try:
+                text = desktop.read_text(encoding="utf-8", errors="replace")
+            except OSError:
+                continue
+            fields: dict[str, str] = {}
+            in_entry = False
+            for line in text.splitlines():
+                line = line.strip()
+                if line.startswith("[") and line.endswith("]"):
+                    in_entry = line == "[Desktop Entry]"
+                    continue
+                if not in_entry or "=" not in line:
+                    continue
+                key, _, value = line.partition("=")
+                fields.setdefault(key, value)
+            icon = fields.get("Icon", "").strip()
+            if not icon:
+                continue
+            keys = {desktop.name.removesuffix(".desktop").lower()}
+            for key in ("StartupWMClass", "Name"):
+                token = fields.get(key, "").strip().lower()
+                if token:
+                    keys.add(token)
+            exec_line = fields.get("Exec", "").split()
+            if exec_line:
+                stem = Path(exec_line[0]).name.lower()
+                if stem not in ("env", "flatpak", "sh", "bash"):
+                    keys.add(stem)
+            for key in keys:
+                mapping.setdefault(key, icon)  # user dirs win: seen first
+    return mapping
 
 
 def hyprctl_json(*args: str) -> Any:
@@ -68,10 +126,23 @@ def workspace_label(client: dict) -> str:
     return name if name else "workspace " + str(wid)
 
 
-def icon_name(client: dict) -> str:
-    # Desktop-entry icon names often match lower-case window class. The QML
-    # resolver falls back cleanly when this is not an installed icon name.
-    return str(client.get("class") or client.get("initialClass") or "applications-system").lower()
+def icon_candidates(client: dict) -> list[str]:
+    """Ordered icon guesses: desktop-declared icons first, then raw class
+    names, then generic app icons."""
+    seen: set[str] = set()
+    out: list[str] = []
+    for token in (client.get("class"), client.get("initialClass")):
+        low = str(token or "").strip().lower()
+        if not low:
+            continue
+        for name in (_icons.get(low, ""), low):
+            if name and name not in seen:
+                seen.add(name)
+                out.append(name)
+    for generic in ("applications-other", "application-x-executable"):
+        if generic not in seen:
+            out.append(generic)
+    return out
 
 
 def visible_client(client: dict) -> bool:
@@ -103,6 +174,7 @@ def result_for(client: dict, rank: float) -> dict:
     address = str(client["address"])
     title = str(client.get("title") or client.get("class") or "Untitled window")
     klass = str(client.get("class") or client.get("initialClass") or "Unknown app")
+    icons = icon_candidates(client)
     state: list[str] = [workspace_label(client), klass]
     if client.get("floating"):
         state.append("floating")
@@ -112,7 +184,9 @@ def result_for(client: dict, rank: float) -> dict:
         "id": "windows:" + address,
         "title": title,
         "subtitle": " \u00b7 ".join(state),
-        "icon": icon_name(client),
+        "icon": icons[0],
+        "icons": icons[1:],
+        "fallbackIcon": "\u25a3",
         "keywords": " ".join([klass, str(client.get("initialClass") or ""), workspace_label(client)]).lower(),
         "score": rank,
         "provider": "windows",
@@ -163,6 +237,8 @@ def search(query: str) -> list[dict]:
 
 
 def main() -> None:
+    global _icons
+    _icons = load_icon_map()
     for line in sys.stdin:
         try:
             msg = json.loads(line)
