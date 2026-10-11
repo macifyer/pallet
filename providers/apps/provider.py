@@ -190,6 +190,7 @@ def search(query: str, apps: list[dict]) -> list[dict]:
                 "title": app["name"],
                 "subtitle": app["subtitle"],
                 "icon": app["icon"],
+                "keywords": app["keywords"],
                 "score": s,
                 "provider": "apps",
                 "actions": actions_for(app),

@@ -36,6 +36,7 @@ Provider to host:
     "subtitle": "Web browser",
     "icon": "firefox",
     "score": 0.9,
+    "keywords": "browser web internet",
     "actions": [
       {"type": "launch", "title": "Launch", "argv": ["firefox"]},
       {"type": "copy", "title": "Copy name", "text": "firefox"}
@@ -45,7 +46,14 @@ Provider to host:
 {"id": "a1", "executed": true}
 ```
 
-The `execute` op goes only to the the provider that authored the result: the host tags each result with its provider name during merge (overriding nothing already set), and the frontend includes that name when it asks for a `custom` action to run.
+The `execute` op goes only to the provider that authored the result: the host tags each result with its provider name during merge (overriding nothing already set), and the frontend includes that name when it asks for a `custom` action to run.
+
+## Result metadata
+
+- `title`, `subtitle`, `icon` — display fields.
+- `keywords` — optional space-separated alias string. The frontend's fuzzy pass matches it with the same subsequence scoring as title and subtitle, so aliases like `sleep` → "Suspend" or `halt` → "Shut Down" survive ranking instead of being dropped. Emit it whenever the provider's own alias matching can find a result that its title would not.
+- `score` — advisory 0..1; blended with the frontend fuzzy score.
+- `provider` — set by the host during merge.
 
 ## Action types
 

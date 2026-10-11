@@ -36,6 +36,11 @@ function matchScore(query, text) {
 // fuzzy score with the provider's advisory score (0.7 / 0.3), sort desc.
 // The host ranks too; this pass exists so the the UI is correct against raw
 // provider output and the user's text always has the final vote.
+//
+// A result may carry an optional `keywords` string (space-separated
+// aliases). It is matched with the same subsequence scoring as title and
+// subtitle, so provider-side aliases like "sleep" -> "Suspend" survive
+// this pass instead of being silently dropped.
 function rank(query, results) {
     const q = String(query || "").toLowerCase();
     const scored = [];
@@ -43,13 +48,14 @@ function rank(query, results) {
         const r = results[i];
         const f = matchScore(q, r.title);
         const s = matchScore(q, r.subtitle);
-        const best = Math.max(f, s);
+        const k = matchScore(q, r.keywords);
+        const best = Math.max(f, s, k);
         if (best < 0)
             continue;
         const advisory = typeof r.score === "number" ? Math.max(0, Math.min(1, r.score)) : 0;
         const out = {};
-        for (const k in r)
-            out[k] = r[k];
+        for (const key in r)
+            out[key] = r[key];
         out.fuzzy = best;
         out.rank = 0.7 * best + 0.3 * advisory;
         scored.push(out);

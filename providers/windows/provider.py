@@ -113,6 +113,7 @@ def result_for(client: dict, rank: float) -> dict:
         "title": title,
         "subtitle": " \u00b7 ".join(state),
         "icon": icon_name(client),
+        "keywords": " ".join([klass, str(client.get("initialClass") or ""), workspace_label(client)]).lower(),
         "score": rank,
         "provider": "windows",
         "actions": [
