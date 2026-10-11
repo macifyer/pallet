@@ -1,10 +1,14 @@
 #!/usr/bin/env python3
-"""System power, session, and update commands.
+"""System power, session, update, and package commands.
 
 Every command mirrors the native Omarchy menu: omarchy system lock/logout/
 reboot/shutdown (which close application windows first), systemctl suspend,
 omarchy menu toggle, and omarchy update in a visible terminal (foot). No raw
-pacman, ever — the update path is Omarchy's own orchestrated script.
+pacman, ever -- update and package management go through Omarchy's own
+orchestrated scripts. The package trio delegates wholesale: each entry opens
+the native menu's exact flow (omarchy-pkg-install / omarchy-pkg-aur-install /
+omarchy-pkg-remove) in a terminal, the same as Install > Package, Install >
+AUR, and Remove > Package behind SUPER+SPACE.
 
 Destructive or disruptive entries carry danger: confirm, so the frontend
 shows the confirmation sheet before a second Enter runs them. Lock is the
@@ -53,9 +57,27 @@ ENTRIES: list[dict] = [
         confirm_detail="Suspends the machine immediately; waking takes a moment.",
     ),
     entry(
-        "Update Omarchy", "Snapshot, packages, migrations — the official update", "software-update-available", ["foot", "--", "omarchy", "update"], "update upgrade refresh",
+        "Update Omarchy", "Snapshot, packages, migrations -- the official update", "software-update-available", ["foot", "--", "omarchy", "update"], "update upgrade refresh",
         danger="confirm", tone="positive", confirm_title="Update Omarchy?",
-        confirm_detail="Runs 'omarchy update' in a terminal: snapshot, packages, migrations, and a shell restart. Uses Omarchy's own update path — no raw pacman.",
+        confirm_detail="Runs 'omarchy update' in a terminal: snapshot, packages, migrations, and a shell restart. Uses Omarchy's own update path -- no raw pacman.",
+    ),
+    entry(
+        "Install Package", "Install from the official repos -- Omarchy's installer", "system-software-install",
+        ["xdg-terminal-exec", "--app-id=org.omarchy.terminal", "omarchy-pkg-install"], "install package pacman repo repos",
+        danger="confirm", tone="positive", confirm_title="Install a package?",
+        confirm_detail="Opens Omarchy's package installer in a terminal -- the same flow as the native menu's Install > Package.",
+    ),
+    entry(
+        "Install from AUR", "Install from the Arch User Repository", "system-software-install",
+        ["xdg-terminal-exec", "--app-id=org.omarchy.terminal", "omarchy-pkg-aur-install"], "aur install yay paru user repository",
+        danger="confirm", tone="warning", confirm_title="Install from the AUR?",
+        confirm_detail="Opens Omarchy's AUR installer in a terminal (Install > AUR). It will build a community PKGBUILD -- same flow the native menu uses.",
+    ),
+    entry(
+        "Remove Package", "Uninstall a package -- Omarchy's remover", "package-remove",
+        ["xdg-terminal-exec", "--app-id=org.omarchy.terminal", "omarchy-pkg-remove"], "remove uninstall package delete pkg",
+        danger="confirm", tone="danger", confirm_title="Remove a package?",
+        confirm_detail="Opens Omarchy's package remover in a terminal -- the same flow as the native menu's Remove > Package.",
     ),
     entry(
         "Log Out", "End the session after closing windows", "system-log-out", ["omarchy", "system", "logout"], "logout log out exit session",
