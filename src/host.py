@@ -22,7 +22,11 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
 PROVIDERS_DIR = ROOT / "providers"
-MERGE_TIMEOUT_S = 0.15  # latency budget, docs/PROVIDERS.md rule 4
+# Latency budget (docs/PROVIDERS.md rule 4). 150ms was aggressive on a busy
+# machine: one slow provider silently vanished from a query, which read as
+# random missing commands. 500ms is still far under keystroke cadence and
+# the merge returns as soon as every provider has answered anyway.
+MERGE_TIMEOUT_S = 0.5
 
 
 def log(*args: object) -> None:

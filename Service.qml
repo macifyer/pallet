@@ -4,14 +4,18 @@ import Quickshell.Io
 
 // Headless plugin service (kind: service): registers Pallet's hotkey in the
 // running Hyprland session without editing hyprland.conf, and re-asserts it
-// after every `hyprctl reload`, because Hyprland drops runtime bindings.
+// whenever it goes missing, because Hyprland drops runtime bindings on any
+// `hyprctl reload` (which Omarchy's own toggles issue for gaps/animations).
+//
+// Two re-assertion paths:
+//   - reloadWatcher: instant, tails socket2 via socat (only if socat exists)
+//   - heartbeat: socat-independent poll every few seconds; catches every
+//     reload regardless of tooling, so the bind can never stay gone
 //
 // Mechanism after MaNi4's omarchy-search-menu-items (MIT): `hyprctl eval`
-// with hl.bind()/hl.unbind() Lua. `hyprctl keyword bindd` does not land
-// reliably at runtime — the first version of this file logged a binding
-// that never existed. Registration is verified by re-reading the binds,
-// so the log can only report what Hyprland actually holds. Bindings are
-// told apart by description; user bindings are never overwritten.
+// with hl.bind()/hl.unbind() Lua. Registration is always verified by
+// re-reading the binds, so the log only reports what Hyprland holds.
+// Bindings are told apart by description; user bindings are never replaced.
 
 Item {
     id: root
@@ -54,13 +58,25 @@ Item {
         }
     }
 
-    // Hyprland drops runtime binds on `hyprctl reload`; socket2 carries the
-    // configreloaded event. Needs socat; without it, the bind quietly
-    // vanishes on reload until the plugin is reloaded.
+    // Poll against runtime-bind loss. One cheap hyprctl read per interval;
+    // planBinds() short-circuits when our bind is already present, so the
+    // steady state is silent. This path works with no external tooling.
+    Timer {
+        id: heartbeat
+        interval: 4000
+        repeat: true
+        running: true
+        onTriggered: bindsReader.running = true
+    }
+
+    // Fast path: Hyprland's socket2 carries a configreloaded event; when
+    // socat happens to be installed we re-assert instantly instead of
+    // waiting for the next heartbeat tick. If socat is missing the process
+    // simply exits and the heartbeat alone keeps the bind alive.
     Process {
         id: reloadWatcher
         running: true
-        command: ["sh", "-c", "socat -U - UNIX-CONNECT:$XDG_RUNTIME_DIR/hypr/$HYPRLAND_INSTANCE_SIGNATURE/.socket2.sock | while IFS= read -r line; do case \"$line\" in configreloaded*) echo reload;; esac; done"]
+        command: ["sh", "-c", "command -v socat >/dev/null && socat -U - UNIX-CONNECT:$XDG_RUNTIME_DIR/hypr/$HYPRLAND_INSTANCE_SIGNATURE/.socket2.sock | while IFS= read -r line; do case \"$line\" in configreloaded*) echo reload;; esac; done"]
         stdout: SplitParser {
             onRead: data => {
                 if (data.trim() === "reload")
@@ -119,20 +135,20 @@ Item {
                 "hl.unbind(" + luaQuote(formatCombo(Number(bind.modmask), keyOf(bind))) + ")"]);
         }
 
-        // We registered but Hyprland doesn't hold the bind: say so.
+        // We asked for a bind and Hyprland doesn't hold it: whether this was
+        // a verification pass or a heartbeat catch-up, (re)register below.
         if (root.verifyPending) {
             root.verifyPending = false;
-            root.bound = false;
-            console.warn("pallet: ALT+SPACE registration did not land; hyprctl eval hl.bind failed");
-            return;
+            console.warn("pallet: ALT+SPACE registration did not land; retrying");
         }
 
         // Never stomp a user's (or Omarchy's) binding.
         for (const other of binds) {
             if (matchesOurs(other)) {
-                console.warn("pallet: ALT+SPACE is already bound to '"
-                    + (other.description || ((other.dispatcher ?? "") + " " + (other.arg ?? "")))
-                    + "'; leaving it alone. Bind Pallet yourself: " + root.summon);
+                if (!root.bound)
+                    console.warn("pallet: ALT+SPACE is already bound to '"
+                        + (other.description || ((other.dispatcher ?? "") + " " + (other.arg ?? "")))
+                        + "'; leaving it alone. Bind Pallet yourself: " + root.summon);
                 root.bound = false;
                 return;
             }
