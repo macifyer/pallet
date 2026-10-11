@@ -17,17 +17,25 @@ their files; files touched in the last 7 days get a small recency nudge;
 deep paths are penalized slightly. Final order still belongs to the
 frontend fuzzy pass.
 
-## Actions
+## Primary Enter
+
+Enter (actions[0]) targets the sensible app for the file, not the MIME
+lottery:
+
+| File kind | Primary action |
+|---|---|
+| Code/text (`text-*` families, scripts, .md) | Open in editor — `$VISUAL`/`$EDITOR` first, GUI editors direct, terminal editors via `foot -e` |
+| Markdown inside an Obsidian vault (ancestor holds `.obsidian/`) | Open in Obsidian via `obsidian://open?path=…` URI |
+| Images, PDFs, audio/video, archives | xdg-open MIME default |
+
+The generic MIME `Open` stays in the panel as a fallback for odd system
+defaults (e.g. browsers claiming `text/plain`).
+
+## All actions
 
 | Result | Actions |
 |---|---|
-| File | Open (xdg-open/MIME default) · Open in editor* · Open containing folder · Open terminal here · Copy path |
+| File | primary (above) · Open · Open containing folder · Open terminal here · Copy path |
 | Directory | Open (file manager) · Open terminal here · Copy path |
-
-*Open in editor appears for text/code files only: `$VISUAL`/`$EDITOR` is
-honored first (GUI editors launch directly, terminal editors are wrapped in
-`foot -e`), then a probed fallback list (Code/Zed/Kate before Helix/Neovim/Vim).
-The default Open stays xdg-open, since some machines attach `text/plain` to
-browsers.
 
 "Open terminal here" launches `foot --working-directory <dir>` as raw argv.
