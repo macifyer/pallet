@@ -1,0 +1,7 @@
+{
+  "name": "plugins",
+  "description": "Search and summon every installed Omarchy shell plugin",
+  "exec": ["python3", "providers/plugins/provider.py"],
+  "triggers": [],
+  "capabilities": ["search"]
+}
