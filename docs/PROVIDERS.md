@@ -45,7 +45,7 @@ Provider to host:
 {"id": "a1", "executed": true}
 ```
 
-The `execute` op goes only to the provider that authored the result: the host tags each result with its provider name during merge (overriding nothing already set), and the frontend includes that name when it asks for a `custom` action to run.
+The `execute` op goes only to the the provider that authored the result: the host tags each result with its provider name during merge (overriding nothing already set), and the frontend includes that name when it asks for a `custom` action to run.
 
 ## Action types
 
@@ -61,17 +61,19 @@ Every action may carry display metadata. Providers own their action labels; the 
 ```json
 {
   "type": "custom",
-  "kind": "focus-window",
-  "title": "Focus window",
-  "subtitle": "Hyprland window action",
-  "icon": "view-window",
-  "address": "0x1af..."
+  "kind": "system-update",
+  "title": "Update Omarchy",
+  "danger": "confirm",
+  "confirmation": {
+    "title": "Update Omarchy?",
+    "detail": "Runs 'omarchy update' in a terminal: packages, migrations, and a snapshot."
+  }
 }
 ```
 
 - `title` — preferred label in the action panel; when absent, the frontend derives one from type and kind.
 - `subtitle` and `icon` are reserved for the panel's detailed rows; providers may emit them today without effect.
-- `danger` is reserved for confirmation-gated actions (a presented detail the user must acknowledge before execution). Not yet implemented; do not emit it yet.
+- `danger: "confirm"` — implemented. Enter on such an action does not execute: the panel swaps to a red-bordered confirmation sheet showing `confirmation.title`/`confirmation.detail`, and only a second Enter runs the action. Esc (or changing the selection) cancels back to the action list. Use it for anything where a mistaken keypress is expensive — updates, removals, power actions.
 
 ## Rules
 

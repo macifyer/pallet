@@ -185,6 +185,12 @@ PanelWindow {
     }
 
     function close(): void {
+        // Esc cascades: cancel an open confirmation, then the panel,
+        // then the palette itself.
+        if (actionPanel.confirming) {
+            actionPanel.cancelConfirm();
+            return;
+        }
         if (root.panelOpen) {
             root.panelOpen = false;
             return;
@@ -195,6 +201,7 @@ PanelWindow {
         root.selectedIndex = 0;
         root.panelOpen = false;
         root.flashMessage = "";
+        actionPanel.reset();
     }
 
     function toggle(): void {
@@ -231,6 +238,8 @@ PanelWindow {
         if (!item || !item.actions || item.actions.length === 0)
             return;
         root.panelOpen = !root.panelOpen;
+        if (!root.panelOpen)
+            actionPanel.reset();
     }
 
     function executeSelection(): void {

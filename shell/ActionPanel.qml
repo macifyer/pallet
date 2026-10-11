@@ -1,24 +1,33 @@
 import QtQuick
 import QtQuick.Layouts
 
-// Action panel: a small floating list of actions for the selected result.
-// Positioned to the right of the palette box, vertically centered on the row.
+// Action panel: a small floating list of actions for the selected result,
+// positioned to the right of the palette box. Actions carrying
+// "danger": "confirm" do not execute on Enter; the panel swaps to a
+// confirmation sheet (“danger sheet”) and only a second Enter runs them.
 Rectangle {
     id: root
 
     required property var result
     signal actionExecuted(var action, var result)
 
-    width: 220
-    height: Math.min(column.implicitHeight + 16, 320)
+    width: 240
+    height: confirming
+        ? Math.min(confirmColumn.implicitHeight + 20, 320)
+        : Math.min(column.implicitHeight + 16, 320)
     radius: 10
     color: "#1e1e2e"
     border.width: 1
-    border.color: "#45475a"
+    border.color: confirming ? "#f38ba8" : "#45475a"
+
+    // Non-null while a danger-gated action awaits its second Enter.
+    property var pendingConfirm: null
+    readonly property bool confirming: pendingConfirm !== null
 
     ColumnLayout {
         id: column
 
+        visible: !root.confirming
         anchors.fill: parent
         anchors.margins: 8
         spacing: 2
@@ -56,10 +65,45 @@ Rectangle {
                     anchors.leftMargin: 10
                     anchors.verticalCenter: parent.verticalCenter
                     text: root.actionLabel(modelData)
-                    color: "#cdd6f4"
+                    color: (modelData.danger === "confirm") ? "#f9e2af" : "#cdd6f4"
                     font.pixelSize: 13
                 }
             }
+        }
+    }
+
+    ColumnLayout {
+        id: confirmColumn
+
+        visible: root.confirming
+        anchors.fill: parent
+        anchors.margins: 10
+        spacing: 6
+
+        Text {
+            Layout.fillWidth: true
+            text: root.confirmTitle()
+            color: "#f38ba8"
+            font.pixelSize: 14
+            font.bold: true
+            wrapMode: Text.WordWrap
+        }
+
+        Text {
+            Layout.fillWidth: true
+            text: root.confirmDetail()
+            color: "#a6adc8"
+            font.pixelSize: 12
+            wrapMode: Text.WordWrap
+        }
+
+        Item { Layout.fillHeight: true }
+
+        Text {
+            Layout.fillWidth: true
+            text: qsTr("Enter confirms \u00b7 Esc cancels")
+            color: "#6c7086"
+            font.pixelSize: 11
         }
     }
 
@@ -87,15 +131,55 @@ Rectangle {
         }
     }
 
+    function confirmTitle(): string {
+        const c = root.pendingConfirm ? root.pendingConfirm.confirmation : null;
+        if (c && c.title && String(c.title).length > 0)
+            return String(c.title);
+        return qsTr("Are you sure?");
+    }
+
+    function confirmDetail(): string {
+        const c = root.pendingConfirm ? root.pendingConfirm.confirmation : null;
+        if (c && c.detail && String(c.detail).length > 0)
+            return String(c.detail);
+        return qsTr("This action cannot be undone from here.");
+    }
+
     function moveAction(step: int): void {
+        if (root.confirming)
+            return;
         const count = root.result && root.result.actions ? root.result.actions.length : 0;
         if (count === 0) return;
         actionIndex = (actionIndex + step + count) % count;
     }
 
     function executeCurrent(): void {
+        if (root.confirming) {
+            const action = root.pendingConfirm;
+            root.pendingConfirm = null;
+            actionExecuted(action, root.result);
+            return;
+        }
         const actions = root.result && root.result.actions ? root.result.actions : [];
         if (actions.length === 0 || actionIndex >= actions.length) return;
-        actionExecuted(actions[actionIndex], root.result);
+        const action = actions[actionIndex];
+        if (action.danger === "confirm") {
+            pendingConfirm = action;
+            return;
+        }
+        actionExecuted(action, root.result);
     }
+
+    function cancelConfirm(): void {
+        pendingConfirm = null;
+    }
+
+    function reset(): void {
+        pendingConfirm = null;
+        actionIndex = 0;
+    }
+
+    // A different result while a confirmation is open always cancels it —
+    // a sheet for one result must never execute against another.
+    onResultChanged: reset()
 }
