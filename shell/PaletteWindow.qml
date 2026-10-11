@@ -250,7 +250,16 @@ PanelWindow {
         const item = root.filtered[root.selectedIndex];
         if (item === undefined || item.actions === undefined || item.actions.length === 0)
             return;
-        bridge.execute(item.actions[0], item);
+        const first = item.actions[0];
+        // Danger-gated primary actions cannot bypass the confirmation
+        // sheet via the direct-Enter path: Enter opens the panel with the
+        // sheet already showing, and only a second Enter executes.
+        if (first.danger === "confirm") {
+            root.panelOpen = true;
+            actionPanel.openConfirm(first);
+            return;
+        }
+        bridge.execute(first, item);
         root.close();
     }
 }

@@ -170,6 +170,13 @@ Rectangle {
         actionExecuted(action, root.result);
     }
 
+    // Entry point for the direct-Enter path in PaletteWindow when the
+    // primary action is danger-gated: opens the panel straight into the
+    // confirmation sheet for that action.
+    function openConfirm(action: var): void {
+        pendingConfirm = action;
+    }
+
     function cancelConfirm(): void {
         pendingConfirm = null;
     }
