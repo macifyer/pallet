@@ -1,0 +1,7 @@
+{
+  "name": "system",
+  "description": "System power, session, and update actions via official omarchy commands",
+  "exec": ["python3", "providers/system/provider.py"],
+  "triggers": [],
+  "capabilities": ["search"]
+}
