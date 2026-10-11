@@ -37,8 +37,8 @@ Provider to host:
     "icon": "firefox",
     "score": 0.9,
     "actions": [
-      {"type": "launch", "argv": ["firefox"]},
-      {"type": "copy", "text": "firefox"}
+      {"type": "launch", "title": "Launch", "argv": ["firefox"]},
+      {"type": "copy", "title": "Copy name", "text": "firefox"}
     ]
   }
 ]}
@@ -52,7 +52,26 @@ The `execute` op goes only to the provider that authored the result: the host ta
 - `launch` — argv array, executed directly by the frontend, no shell
 - `copy` — put text on the clipboard (frontend)
 - `open` — url via xdg-open (frontend)
-- `custom` — provider-defined payload; the frontend sends it back to the owning provider with op `execute` (menu presses, toggles, anything needing provider-side handles)
+- `custom` — provider-defined payload; the frontend sends it back to the owning provider with op `execute` (menu presses, window control, anything needing provider-side handles)
+
+## Action metadata
+
+Every action may carry display metadata. Providers own their action labels; the frontend invents one only when a provider did not.
+
+```json
+{
+  "type": "custom",
+  "kind": "focus-window",
+  "title": "Focus window",
+  "subtitle": "Hyprland window action",
+  "icon": "view-window",
+  "address": "0x1af..."
+}
+```
+
+- `title` — preferred label in the action panel; when absent, the frontend derives one from type and kind.
+- `subtitle` and `icon` are reserved for the panel's detailed rows; providers may emit them today without effect.
+- `danger` is reserved for confirmation-gated actions (a presented detail the user must acknowledge before execution). Not yet implemented; do not emit it yet.
 
 ## Rules
 

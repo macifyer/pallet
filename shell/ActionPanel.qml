@@ -55,15 +55,7 @@ Rectangle {
                     anchors.left: parent.left
                     anchors.leftMargin: 10
                     anchors.verticalCenter: parent.verticalCenter
-                    text: {
-                        switch (modelData.type) {
-                        case "launch": return qsTr("Launch");
-                        case "copy":   return qsTr("Copy");
-                        case "open":   return qsTr("Open");
-                        case "custom": return qsTr("Run");
-                        default:        return modelData.type;
-                        }
-                    }
+                    text: root.actionLabel(modelData)
                     color: "#cdd6f4"
                     font.pixelSize: 13
                 }
@@ -72,6 +64,28 @@ Rectangle {
     }
 
     property int actionIndex: 0
+
+    function actionLabel(action: var): string {
+        // Providers own their action labels; the panel only invents one when
+        // a provider did not supply a title.
+        if (action.title !== undefined && String(action.title).length > 0)
+            return String(action.title);
+        switch (action.type) {
+        case "launch": return qsTr("Launch");
+        case "copy":   return qsTr("Copy");
+        case "open":   return qsTr("Open");
+        case "custom":
+            switch (action.kind) {
+            case "press":             return qsTr("Run menu item");
+            case "focus-window":      return qsTr("Focus window");
+            case "close-window":      return qsTr("Close window");
+            case "toggle-floating":   return qsTr("Toggle floating");
+            case "toggle-fullscreen": return qsTr("Toggle fullscreen");
+            default:                    return qsTr("Run");
+            }
+        default: return action.type;
+        }
+    }
 
     function moveAction(step: int): void {
         const count = root.result && root.result.actions ? root.result.actions.length : 0;

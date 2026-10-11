@@ -149,8 +149,8 @@ def search(query: str, apps: list[dict]) -> list[dict]:
                 "score": s,
                 "provider": "apps",
                 "actions": [
-                    {"type": "launch", "argv": app["argv"]},
-                    {"type": "copy", "text": app["name"]},
+                    {"type": "launch", "title": "Launch", "argv": app["argv"]},
+                    {"type": "copy", "title": "Copy name", "text": app["name"]},
                 ],
             }
         )

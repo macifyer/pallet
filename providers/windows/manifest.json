@@ -1,0 +1,7 @@
+{
+  "name": "windows",
+  "description": "Search and control live Hyprland windows",
+  "exec": ["python3", "providers/windows/provider.py"],
+  "triggers": [],
+  "capabilities": ["search", "execute"]
+}
