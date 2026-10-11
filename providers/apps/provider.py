@@ -9,6 +9,11 @@ file declares it (per the freedesktop spec), otherwise the Exec argv[0].
 This hides the .desktop debris an uninstall leaves behind — pacman removes
 tracked files, but user-level entries (Wine, AppImages, web-app shortcuts)
 survive the death of the binary they point at.
+
+Desktop entries may declare extra ways to invoke the app through the
+Actions= key and [Desktop Action ...] groups (new window, private window,
+profile picker, ...). The spec expects launchers to expose these, so each
+one surfaces here as a titled launch action — no per-app code anywhere.
 """
 
 import json
@@ -31,6 +36,7 @@ XDG_DIRS = [
 FIELD_MARK = "%"
 
 MAX_RESULTS = 15
+MAX_DESKTOP_ACTIONS = 6  # panel caps at 320px; 6 + Launch + Copy name fits
 
 
 def resolves(token: str) -> bool:
@@ -58,13 +64,22 @@ def parse_desktop(path: Path) -> dict | None:
 
     section: str | None = None
     fields: dict[str, str] = {}
+    action_groups: dict[str, dict[str, str]] = {}
     for line in text.splitlines():
         line = line.strip()
+        if not line or line.startswith("#"):
+            continue
         if line.startswith("[") and line.endswith("]"):
             section = line[1:-1]
-        elif section == "Desktop Entry" and "=" in line:
-            key, _, value = line.partition("=")
+            continue
+        if not section or "=" not in line:
+            continue
+        key, _, value = line.partition("=")
+        if section == "Desktop Entry":
             fields.setdefault(key, value)
+        elif section.startswith("Desktop Action "):
+            group = action_groups.setdefault(section.removeprefix("Desktop Action "), {})
+            group.setdefault(key, value)
 
     if fields.get("Type", "Application") != "Application":
         return None
@@ -88,11 +103,28 @@ def parse_desktop(path: Path) -> dict | None:
     if not resolves(argv[0]):
         return None
 
+    # freedesktop "Additional applications actions": every id in Actions=
+    # names a [Desktop Action <id>] group with its own Name/Exec. These are
+    # the app's self-declared extras (e.g. Firefox "New Private Window").
+    desktop_actions: list[dict] = []
+    for action_id in (a for a in fields.get("Actions", "").split(";") if a):
+        group = action_groups.get(action_id, {})
+        action_name = group.get("Name", "").strip()
+        action_argv = split_exec(group.get("Exec", ""))
+        if not action_name or not action_argv:
+            continue
+        if not resolves(action_argv[0]):
+            continue
+        desktop_actions.append({"title": action_name, "argv": action_argv})
+        if len(desktop_actions) >= MAX_DESKTOP_ACTIONS:
+            break
+
     return {
         "name": name,
         "subtitle": fields.get("GenericName") or fields.get("Comment", ""),
         "icon": fields.get("Icon", ""),
         "argv": argv,
+        "desktop_actions": desktop_actions,
         "keywords": fields.get("Keywords", "").replace(";", " ").lower(),
     }
 
@@ -127,6 +159,18 @@ def score(query: str, app: dict) -> float:
     return 0.0
 
 
+def actions_for(app: dict) -> list[dict]:
+    actions = [{"type": "launch", "title": "Launch", "argv": app["argv"]}]
+    for desktop_action in app["desktop_actions"]:
+        actions.append({
+            "type": "launch",
+            "title": desktop_action["title"],
+            "argv": desktop_action["argv"],
+        })
+    actions.append({"type": "copy", "title": "Copy name", "text": app["name"]})
+    return actions
+
+
 def search(query: str, apps: list[dict]) -> list[dict]:
     q = query.strip().lower()
     if not q:
@@ -148,10 +192,7 @@ def search(query: str, apps: list[dict]) -> list[dict]:
                 "icon": app["icon"],
                 "score": s,
                 "provider": "apps",
-                "actions": [
-                    {"type": "launch", "title": "Launch", "argv": app["argv"]},
-                    {"type": "copy", "title": "Copy name", "text": app["name"]},
-                ],
+                "actions": actions_for(app),
             }
         )
     return out
