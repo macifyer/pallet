@@ -18,7 +18,7 @@ Rectangle {
     radius: 10
     color: "#1e1e2e"
     border.width: 1
-    border.color: confirming ? "#f38ba8" : "#45475a"
+    border.color: confirming ? root.confirmColor() : "#45475a"
 
     // Non-null while a danger-gated action awaits its second Enter.
     property var pendingConfirm: null
@@ -65,7 +65,7 @@ Rectangle {
                     anchors.leftMargin: 10
                     anchors.verticalCenter: parent.verticalCenter
                     text: root.actionLabel(modelData)
-                    color: (modelData.danger === "confirm") ? "#f9e2af" : "#cdd6f4"
+                    color: modelData.danger === "confirm" ? root.actionColor(modelData) : "#cdd6f4"
                     font.pixelSize: 13
                 }
             }
@@ -83,7 +83,7 @@ Rectangle {
         Text {
             Layout.fillWidth: true
             text: root.confirmTitle()
-            color: "#f38ba8"
+            color: root.confirmColor()
             font.pixelSize: 14
             font.bold: true
             wrapMode: Text.WordWrap
@@ -110,8 +110,6 @@ Rectangle {
     property int actionIndex: 0
 
     function actionLabel(action: var): string {
-        // Providers own their action labels; the panel only invents one when
-        // a provider did not supply a title.
         if (action.title !== undefined && String(action.title).length > 0)
             return String(action.title);
         switch (action.type) {
@@ -129,6 +127,22 @@ Rectangle {
             }
         default: return action.type;
         }
+    }
+
+    // Tone is visual semantics; danger controls the behavioral confirmation
+    // gate. A safe-but-impactful maintenance task can therefore be positive
+    // (green) while still requiring an explicit second Enter.
+    function actionColor(action: var): string {
+        switch (action.tone) {
+        case "positive": return "#a6e3a1";
+        case "warning":  return "#f9e2af";
+        case "danger":   return "#f38ba8";
+        default:           return "#f9e2af";
+        }
+    }
+
+    function confirmColor(): string {
+        return root.pendingConfirm ? root.actionColor(root.pendingConfirm) : "#f38ba8";
     }
 
     function confirmTitle(): string {
@@ -170,9 +184,6 @@ Rectangle {
         actionExecuted(action, root.result);
     }
 
-    // Entry point for the direct-Enter path in PaletteWindow when the
-    // primary action is danger-gated: opens the panel straight into the
-    // confirmation sheet for that action.
     function openConfirm(action: var): void {
         pendingConfirm = action;
     }
@@ -186,7 +197,5 @@ Rectangle {
         actionIndex = 0;
     }
 
-    // A different result while a confirmation is open always cancels it —
-    // a sheet for one result must never execute against another.
     onResultChanged: reset()
 }
