@@ -43,7 +43,7 @@ PanelWindow {
 
     // Click on the transparent backdrop dismisses.
     TapHandler {
-        onTapped: root.close()
+        onTapped: root.dismiss()
     }
 
     Rectangle {
@@ -136,7 +136,8 @@ PanelWindow {
 
         onActionExecuted: (action, result) => {
             bridge.execute(action, result);
-            root.close();
+            // Execution always dismisses the whole palette, panel or not.
+            root.dismiss();
         }
     }
 
@@ -184,9 +185,9 @@ PanelWindow {
         visible = true;
     }
 
+    // Esc/close(): user-initiated dismissal, so it cascades -- confirmation
+    // sheet first, then the action panel, then the palette itself.
     function close(): void {
-        // Esc cascades: cancel an open confirmation, then the panel,
-        // then the palette itself.
         if (actionPanel.confirming) {
             actionPanel.cancelConfirm();
             return;
@@ -195,6 +196,13 @@ PanelWindow {
             root.panelOpen = false;
             return;
         }
+        dismiss();
+    }
+
+    // dismiss(): unconditional teardown. Used after executing an action and
+    // for the transparent backdrop, where "close only the panel" would leave
+    // the search bar hanging over whatever the action just launched.
+    function dismiss(): void {
         visible = false;
         searchInput.text = "";
         root.filtered = [];
@@ -260,6 +268,6 @@ PanelWindow {
             return;
         }
         bridge.execute(first, item);
-        root.close();
+        root.dismiss();
     }
 }
