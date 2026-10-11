@@ -1,0 +1,7 @@
+{
+  "name": "omarchy",
+  "description": "Omarchy menu parity: panels, triggers, style, and learning",
+  "exec": ["python3", "providers/omarchy/provider.py"],
+  "triggers": [],
+  "capabilities": ["search"]
+}

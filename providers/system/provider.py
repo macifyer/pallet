@@ -3,9 +3,12 @@
 
 Every command mirrors the native Omarchy menu. Icons use a primary theme name,
 an ordered candidate list, and a glyph fallback so no theme leaves a row bare.
+Hibernate is gated identically to upstream: it is listed only when
+omarchy-hibernation-available succeeds on this machine.
 """
 from __future__ import annotations
 import json
+import subprocess
 import sys
 MAX_RESULTS = 15
 BLUE = "#89b4fa"
@@ -19,10 +22,17 @@ def entry(title: str, subtitle: str, icon: str, argv: list[str], aliases: str, i
         action["danger"] = "confirm"; action["tone"] = tone or "warning"; action["confirmation"] = {"title": confirm_title, "detail": confirm_detail}
     return {"title": title, "subtitle": subtitle, "icon": icon, "icons": icons or [], "fallbackIcon": fallback_icon, "fallbackColor": fallback_color, "aliases": (title + " " + aliases).lower(), "actions": [action, {"type": "copy", "title": "Copy command", "text": " ".join(argv)}]}
 
+def hibernation_available() -> bool:
+    try:
+        return subprocess.run(["omarchy-hibernation-available"], check=False, capture_output=True, timeout=2).returncode == 0
+    except (OSError, subprocess.TimeoutExpired):
+        return False
+
 ENTRIES: list[dict] = [
     entry("Lock", "Lock the screen now", "system-lock-screen", ["omarchy", "system", "lock"], "lock screen screensaver", ["lock", "system-lock"], "\U0001f512"),
     entry("Omarchy Menu", "Open the native Omarchy menu", "application-menu", ["omarchy", "menu", "toggle"], "menu native omarchy", ["open-menu-symbolic", "start-here"], "\u2630"),
     entry("Suspend", "Suspend the machine", "system-suspend", ["systemctl", "suspend"], "suspend sleep rest", ["weather-clear-night", "night-light", "system-suspend-hibernate"], "\U0001f319", YELLOW, "confirm", "warning", "Suspend now?", "Suspends the machine immediately; waking takes a moment."),
+    *([entry("Hibernate", "Save memory to disk and power off", "system-suspend-hibernate", ["systemctl", "hibernate"], "hibernate deep sleep power", ["weather-clear-night", "system-suspend"], "\u2744", YELLOW, "confirm", "warning", "Hibernate now?", "Saves the session to disk and powers off; resume depends on your hibernation setup.")] if hibernation_available() else []),
     entry("Update Omarchy", "Snapshot, packages, migrations -- the official update", "software-update-available", ["foot", "--", "omarchy", "update"], "update upgrade refresh", ["system-software-update", "software-update-urgent", "view-refresh"], "\u2b06", GREEN, "confirm", "positive", "Update Omarchy?", "Runs 'omarchy update' in a terminal: snapshot, packages, migrations, and a shell restart. Uses Omarchy's own update path -- no raw pacman."),
     entry("Install Package", "Install from the official repos -- Omarchy's installer", "system-software-install", ["xdg-terminal-exec", "--app-id=org.omarchy.terminal", "omarchy-pkg-install"], "install package pacman repo repos", ["package-install", "package"], "\U0001f4e6", GREEN),
     entry("Install from AUR", "Install from the Arch User Repository", "system-software-install", ["xdg-terminal-exec", "--app-id=org.omarchy.terminal", "omarchy-pkg-aur-install"], "aur install yay paru user repository", ["package-install", "package"], "\U0001f4e6", YELLOW),
