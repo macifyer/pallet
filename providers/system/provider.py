@@ -64,20 +64,14 @@ ENTRIES: list[dict] = [
     entry(
         "Install Package", "Install from the official repos -- Omarchy's installer", "system-software-install",
         ["xdg-terminal-exec", "--app-id=org.omarchy.terminal", "omarchy-pkg-install"], "install package pacman repo repos",
-        danger="confirm", tone="positive", confirm_title="Install a package?",
-        confirm_detail="Opens Omarchy's package installer in a terminal -- the same flow as the native menu's Install > Package.",
     ),
     entry(
         "Install from AUR", "Install from the Arch User Repository", "system-software-install",
         ["xdg-terminal-exec", "--app-id=org.omarchy.terminal", "omarchy-pkg-aur-install"], "aur install yay paru user repository",
-        danger="confirm", tone="warning", confirm_title="Install from the AUR?",
-        confirm_detail="Opens Omarchy's AUR installer in a terminal (Install > AUR). It will build a community PKGBUILD -- same flow the native menu uses.",
     ),
     entry(
         "Remove Package", "Uninstall a package -- Omarchy's remover", "package-remove",
         ["xdg-terminal-exec", "--app-id=org.omarchy.terminal", "omarchy-pkg-remove"], "remove uninstall package delete pkg",
-        danger="confirm", tone="danger", confirm_title="Remove a package?",
-        confirm_detail="Opens Omarchy's package remover in a terminal -- the same flow as the native menu's Remove > Package.",
     ),
     entry(
         "Log Out", "End the session after closing windows", "system-log-out", ["omarchy", "system", "logout"], "logout log out exit session",
