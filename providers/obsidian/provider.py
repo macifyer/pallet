@@ -1,17 +1,17 @@
 #!/usr/bin/env python3
-"""Obsidian actions via documented app URIs and optional CLI guidance.
+"""Explicit Obsidian intent routing; never infer note creation from search.
 
-Supported app URIs come from Obsidian's public docs: open, new, daily,
-search, and choose-vault. Query text is percent-encoded into the URI value;
-it never reaches a shell. CLI actions only surface when an `obsidian` CLI
-is available, and they open the reference in a visible terminal instead of
-guessing unsupported command IDs.
+The host supplies optional scope metadata. Generic launcher queries do not
+become Obsidian searches unless they name Obsidian or explicitly request a
+new note. No indexing, vault selection, or CLI readiness is claimed here.
 """
 from __future__ import annotations
+import hashlib
 import json
+import re
 import shutil
 import sys
-from urllib.parse import quote
+from urllib.parse import urlencode, quote
 
 MAX_RESULTS = 15
 BLUE = "#89b4fa"
@@ -35,10 +35,8 @@ def entry(title: str, subtitle: str, icon: str, argv: list[str] | None = None, u
             "actions": [action, {"type": "copy", "title": "Copy target", "text": text}]}
 
 def uri(action: str, **params: str) -> str:
-    query = []
-    for key, value in params.items():
-        if value != "": query.append(f"{key}={quote(value, safe='')}")
-    return "obsidian://" + action + ("?" + "&".join(query) if query else "")
+    query = urlencode({k: v for k, v in params.items() if v}, quote_via=quote)
+    return "obsidian://" + action + ("?" + query if query else "")
 
 def base_entries(q: str) -> list[dict]:
     present = has_obsidian()
