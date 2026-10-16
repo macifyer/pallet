@@ -1,0 +1,7 @@
+{
+  "name": "obsidian",
+  "description": "Obsidian vault actions and URI/CLI entry points",
+  "exec": ["python3", "providers/obsidian/provider.py"],
+  "triggers": [],
+  "capabilities": ["search"]
+}

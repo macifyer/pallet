@@ -1,10 +1,6 @@
 # Pallet
 
-![Pallet](preview.png)
-
-A keyboard-driven command palette for Omarchy on Arch/Hyprland, built on Quickshell. Summon it, type, act — applications, windows, calculation, script commands, and the focused application's own menu items via AT-SPI.
-
-**Status:** early but daily-drivable. App search, fuzzy ranking, theme icons, and focused-app menu search work; more providers land next.
+A keyboard-driven command palette for Omarchy on Arch/Hyprland, built on Quickshell. Summon it, type, act — applications, windows, files, system commands, Omarchy actions, installed plugins, run-any-command, and Obsidian actions in one overlay.
 
 ## Install (Omarchy Quattro)
 
@@ -12,65 +8,77 @@ A keyboard-driven command palette for Omarchy on Arch/Hyprland, built on Quicksh
 omarchy plugin add https://github.com/macifyer/pallet.git --enable
 ```
 
-That's it — Pallet registers its own hotkey: ALT+SPACE toggles the palette, leaving SUPER+SPACE on the built-in Omarchy menu. If ALT+SPACE is already bound on your system, Pallet logs a warning in the shell log instead of overriding it; bind `omarchy-shell shell toggle io.github.macifyer.pallet` to a key of your choice in that case.
+ALT+SPACE toggles the palette; SUPER+SPACE stays on the stock Omarchy menu.
 
 ## Update
-
-Installed from git:
 
 ```sh
 omarchy plugin update io.github.macifyer.pallet
 ```
 
-Developing (the plugin directory IS the checkout — validators reject symlinks):
+Development:
 
 ```sh
 git clone git@github.com:macifyer/pallet.git \
     ~/.config/omarchy/plugins/io.github.macifyer.pallet
 omarchy-shell shell rescanPlugins && omarchy plugin enable io.github.macifyer.pallet
-# edit and commit in that directory; the shell auto-reloads on save
 ```
 
-See docs/PLUGIN.md for the lifecycle contract, validation, and publish checklist. Standalone development (any Quickshell setup) is covered in shell/README.md.
+## Search scopes
 
-## Stack
+Use prefixes when you want one provider focused instead of mixed search:
 
-- **Frontend:** Quickshell / QML
-- **Core (prototype):** Python, JSON over stdio
-- **Compositor:** Hyprland (windows, focus, runtime keybindings via `hyprctl eval`)
-- **Integration:** Omarchy shell plugin (kinds: overlay + service)
+- `files:invoice` or `f:invoice` — files only
+- `obsidian:todo` or `o:todo` — Obsidian actions only
+- `apps:zen` or `a:zen` — applications only
 
-## Layout
+Mixed search remains the default; scopes are additive, not required.
 
+## Obsidian setup
+
+The Obsidian provider uses official `obsidian://` actions (open, daily, new, search, choose-vault). Vault contents are not indexed here yet, and Pallet never pipes note text into a shell.
+
+### URI requirements
+
+Obsidian normally registers `obsidian://` after the app is installed. On Linux, your desktop entry should pass URIs with `%u`, for example:
+
+```desktop
+Exec=obsidian %u
 ```
-manifest.json      Omarchy plugin contract
-PalletOverlay.qml  overlay entry point (summon/hide -> open/close)
-Service.qml        service entry point (self-registering ALT+SPACE hotkey)
-shell/             Quickshell QML (window, search, results, actions)
-src/               Python core (provider host: fanout, merge, cancel)
-providers/         One directory per provider (apps, menus, ...)
-docs/              architecture + provider protocol + plugin guide
+
+AppImage installs may need you to extract the AppImage and point the desktop entry at the unpacked executable. Verify with:
+
+```sh
+xdg-open 'obsidian://choose-vault'
 ```
 
-## Milestones
+### CLI setup
 
-1. ~~The loop~~ — shortcut, search, ranked results, select, execute, close
-2. Action panel — open / copy / reveal / alternate actions
-3. ~~Menu search~~ — focused app menus via AT-SPI (port of MaNi4's walker, MIT); deeper coverage next
-4. Persistent tools — clipboard history, snippets, timers, file search
-5. Hyprland + Omarchy providers — window switching, system actions, packages
-6. Workflows and AI — reviewable, confirmable actions
+Optional Obsidian CLI actions require Obsidian installer version 1.12.7+.
+
+1. In Obsidian, open Settings → General → Command line interface.
+2. Enable it and let Obsidian register the CLI.
+3. On Linux, confirm `~/.local/bin/obsidian` exists and `~/.local/bin` is in PATH.
+4. Restart your terminal, then run:
+
+```sh
+obsidian help
+```
+
+Pallet includes an `Obsidian CLI reference` action when `obsidian` is available. Future AI/CLI actions will use only capability-checked commands, not guessed IDs.
+
+## Files, yazi, and fzf direction
+
+The files provider is name-based and fast. A later file scope can wrap visible terminal pickers such as `yazi` or `fzf`, but Pallet will not replace them with opaque shell command execution from the search text.
 
 ## Security posture
 
-- Providers run as subprocesses with declared commands; never unrestricted QML plugins.
-- Search text is never executed as a shell command.
-- Privileged or destructive actions get visible confirmation; nothing silent with sudo.
-- Clipboard storage is opt-in with explicit controls.
-- AI proposes actions; humans confirm them.
+- Search text is URI-encoded for app targets and is never executed directly by Pallet.
+- The explicit `Run:` command result opens a visible terminal and carries confirmation.
+- Destructive session/package actions keep confirmation sheets.
+- CLI and AI integrations must be opt-in, documented, and capability checked.
 
 ## Credits
 
-- [MaNi4/omarchy-search-menu-items](https://github.com/MaNi4/omarchy-search-menu-items) (MIT) — AT-SPI menu walking, hotkey registration pattern, and pure-model test pattern
-- [bjarneo/omarchy-shell-plugins](https://github.com/bjarneo/omarchy-shell-plugins) (MIT) — Omni palette reference
-- Raycast, Vicinae, Wox, Ueli — inspiration only (Vicinae is GPL-3.0; its code is not used)
+- MaNi4/omarchy-search-menu-items (MIT), bjarneo/omarchy-shell-plugins (MIT)
+- Raycast, Vicinae, Wox, Ueli — inspiration only
