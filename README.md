@@ -24,6 +24,35 @@ git clone git@github.com:macifyer/pallet.git \
 omarchy-shell shell rescanPlugins && omarchy plugin enable io.github.macifyer.pallet
 ```
 
+## Versions and development checks
+
+The root `manifest.json` is the single source of the product version:
+`MAJOR.MINOR.PATCH` in JSON and `vMAJOR.MINOR.PATCH` for release tags.
+Bundled providers inherit the product version. Manifest `schemaVersion` is
+separate and must not track product releases. See [Versioning and releases](docs/VERSIONING.md)
+and [Changelog](CHANGELOG.md). Old version numbers in git history remain historical.
+
+Read the installed checkout version without relying on a stale README label:
+
+```sh
+python3 -c 'import json; print(json.load(open("manifest.json"))["version"])'
+python3 scripts/check_release.py
+python3 -m unittest discover -s tests -v
+```
+
+Host smoke test (does not execute result actions):
+
+```sh
+printf '%s\n' '{"id":"t","op":"search","query":"obsidian:notes"}' | python3 src/host.py
+```
+
+Expect a JSON reply on stdout with `id: t`, `scope: obsidian`, `bare: notes`,
+and a `results` array. The `host: providers up` line is stderr diagnostics,
+not a successful search response. On EOF the host lets the final query
+finish within the merge deadline before shutting providers down. Empty
+results can still indicate an unavailable, failing, or slow provider.
+Python fixture tests do not replace native QML/Hyprland/Obsidian validation.
+
 ## Search scopes
 
 Use prefixes when you want one provider focused instead of mixed search:

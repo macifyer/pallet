@@ -126,10 +126,30 @@ async def amain():
             host.providers.append(Provider(spec.get("name", manifest.parent.name), resolve_exec(argv), host.inbox))
     for p in host.providers: await p.start()
     log(f"providers up: {[p.name for p in host.providers if p.alive] or 'none'}")
-    try: await read_client(host)
+    try:
+        await read_client(host)
+        # A pipe closes stdin immediately after its last request. Let that
+        # search finish within the existing merge budget before shutdown.
+        if host.merge_task is not None:
+            with contextlib.suppress(asyncio.CancelledError):
+                await host.merge_task
     finally:
-        for p in host.providers:
-            if p.alive and p.proc is not None: p.proc.terminate()
+        if host.merge_task is not None and not host.merge_task.done():
+            host.merge_task.cancel()
+            with contextlib.suppress(asyncio.CancelledError):
+                await host.merge_task
+        processes = [p.proc for p in host.providers if p.proc is not None]
+        for proc in processes:
+            if proc.returncode is None:
+                with contextlib.suppress(ProcessLookupError):
+                    proc.terminate()
+        for proc in processes:
+            try:
+                await asyncio.wait_for(proc.wait(), timeout=1.0)
+            except asyncio.TimeoutError:
+                with contextlib.suppress(ProcessLookupError):
+                    proc.kill()
+                await proc.wait()
 
 if __name__ == "__main__":
     try: asyncio.run(amain())
