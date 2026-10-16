@@ -5,6 +5,21 @@ Release numbers come from the root manifest.json. This changelog starts with
 
 ## [Unreleased]
 
+## [0.8.2]
+
+### Fixed
+- Obsidian searches never generate a new-note action merely from query length.
+- Require explicit `new note NAME` or `create note NAME` intent; validate the
+  name and confirm creation without sending overwrite/append parameters.
+- Pass optional scope metadata to providers so generic launcher queries do
+  not accidentally become Obsidian searches.
+- Replace the executable-presence-based CLI help shortcut with an honest
+  official CLI setup-guide link, not a claim of CLI readiness.
+- Preserve query text through URI encoding and add 12 intent/protocol/host
+  tests that do not launch Obsidian or touch a user's vault.
+
+This is a search-intent correction, not local vault indexing or a setup UI.
+
 ## [0.8.1]
 
 ### Fixed

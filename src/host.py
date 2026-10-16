@@ -80,7 +80,7 @@ class Host:
         scope, bare = split_scope(str(msg.get("query", "")))
         await self.discard_pending(); self.latest_qid = str(msg.get("id", ""))
         names = {p.name for p in self.providers if scope == "" or p.name == scope}
-        await self.send_to(names, {"id": self.latest_qid, "op": "search", "query": bare})
+        await self.send_to(names, {"id": self.latest_qid, "op": "search", "query": bare, "scope": scope})
         self.merge_task = asyncio.create_task(self._merge(self.latest_qid, names, scope, bare))
     async def on_cancel(self, msg): await self.discard_pending()
     async def on_execute(self, msg):

@@ -67,6 +67,35 @@ Mixed search remains the default; scopes are additive, not required.
 
 The Obsidian provider uses official `obsidian://` actions (open, daily, new, search, choose-vault). Vault contents are not indexed here yet, and Pallet never pipes note text into a shell.
 
+### Search versus creation
+
+- `obsidian:project` or `o:project` offers **Search Obsidian: project**.
+  Selecting it opens Obsidian's search; Pallet does not yet list local vault notes.
+- `obsidian project` provides the same explicit Obsidian handoff from mixed search.
+- `obsidian:new note My Note` or `obsidian create note My Note` offers an
+  explicitly named creation action with a confirmation sheet. Generic
+  searches never imply creation, even when no notes match.
+- `obsidian:new note` is a non-executable instruction row until a name is supplied.
+- New-note names must be one printable filename of at most 200 characters;
+  slashes, backslashes, dot/dot-dot, and control characters are rejected.
+- `obsidian:search new note Project` forces a search for the literal phrase
+  `new note Project` instead of treating it as a creation command.
+- `obsidian:daily` opens or creates today's note through Obsidian's Daily notes
+  plugin; `obsidian:vault` opens the vault manager.
+- `obsidian:setup` and `obsidian:cli` open the official setup documentation.
+  These are guide links, not a Pallet onboarding screen or readiness test.
+
+URI parameters are percent-encoded. Creation sends only `name`: no `path`,
+`file`, `overwrite`, `append`, `content`, or `clipboard` parameter. Obsidian
+chooses the destination and new-note location; Pallet does not yet configure
+or verify a target vault. Review the confirmation and the active vault before
+creating. Setup UI, saved vault selection, note indexing, canvas/base/folder
+creation, and AI command execution remain future work.
+
+The host now includes an optional `scope` field in search messages so the
+Obsidian provider distinguishes explicit scoped searches from unrelated
+mixed searches. Existing providers can ignore this additive metadata.
+
 ### URI requirements
 
 Obsidian normally registers `obsidian://` after the app is installed. On Linux, your desktop entry should pass URIs with `%u`, for example:
@@ -94,7 +123,10 @@ Optional Obsidian CLI actions require Obsidian installer version 1.12.7+.
 obsidian help
 ```
 
-Pallet includes an `Obsidian CLI reference` action when `obsidian` is available. Future AI/CLI actions will use only capability-checked commands, not guessed IDs.
+Pallet offers an `Obsidian CLI Setup Guide` link. An `obsidian` executable
+on PATH proves neither CLI registration nor readiness, so Pallet no longer
+labels executable presence as a capability check or launches a help shell
+from this result. Future AI/CLI actions require real capability checks.
 
 ## Files, yazi, and fzf direction
 

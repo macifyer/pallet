@@ -13,71 +13,94 @@ import shutil
 import sys
 from urllib.parse import urlencode, quote
 
-MAX_RESULTS = 15
-BLUE = "#89b4fa"
-PURPLE = "#cba6f7"
-GREEN = "#a6e3a1"
-YELLOW = "#f9e2af"
-
-def has_obsidian() -> bool:
-    return shutil.which("obsidian") is not None
-
-def entry(title: str, subtitle: str, icon: str, argv: list[str] | None = None, url: str | None = None, aliases: str = "", glyph: str = "◆", color: str = BLUE, danger: str = "none", tone: str = "", confirm_title: str = "", confirm_detail: str = "") -> dict:
-    if argv is not None:
-        action: dict = {"type": "launch", "title": title, "argv": argv}
-    else:
-        action = {"type": "open", "title": title, "url": url or "obsidian://choose-vault"}
-    if danger == "confirm":
-        action["danger"] = "confirm"; action["tone"] = tone or "warning"; action["confirmation"] = {"title": confirm_title, "detail": confirm_detail}
-    text = " ".join(argv) if argv is not None else (url or "")
-    return {"title": title, "subtitle": subtitle, "icon": icon, "icons": [icon], "fallbackIcon": glyph, "fallbackColor": color,
-            "aliases": (title + " " + aliases).lower(),
-            "actions": [action, {"type": "copy", "title": "Copy target", "text": text}]}
 
 def uri(action: str, **params: str) -> str:
     query = urlencode({k: v for k, v in params.items() if v}, quote_via=quote)
-    return "obsidian://" + action + ("?" + query if query else "")
+    return 'obsidian://' + action + ('?' + query if query else '')
 
-def base_entries(q: str) -> list[dict]:
-    present = has_obsidian()
-    entries = [
-        entry("Open Obsidian", "Launch Obsidian", "obsidian", argv=["obsidian"] if present else ["xdg-open", "obsidian://choose-vault"], aliases="obsidian notes vault markdown app launch", glyph="📓"),
-        entry("Obsidian Daily Note", "Create or open today's daily note", "obsidian", url=uri("daily"), aliases="obsidian daily today journal note", glyph="🗓", color=GREEN),
-        entry("Obsidian Search", "Open Obsidian's search view" + (f' for "{q}"' if len(q) >= 2 else ""), "obsidian", url=uri("search", query=q), aliases="obsidian search find notes vault content", glyph="🔎", color=PURPLE),
-        entry("Obsidian Vault Manager", "Choose or manage vaults", "obsidian", url=uri("choose-vault"), aliases="obsidian vault choose vaults manage", glyph="🗂", color=YELLOW),
+
+def row(key: str, title: str, subtitle: str, query: str, url: str = '', argv=None, confirm=False) -> dict:
+    action = {'type': 'launch', 'title': title, 'argv': argv} if argv else {'type': 'open', 'title': title, 'url': url}
+    if confirm:
+        action.update(danger='confirm', tone='positive', confirmation={
+            'title': 'Create this Obsidian note?',
+            'detail': subtitle + ' No overwrite, append, content, or clipboard parameter is sent.',
+        })
+    actions = [action, {'type': 'copy', 'title': 'Copy target', 'text': ' '.join(argv) if argv else url}] if (url or argv) else []
+    return {
+        'id': 'obsidian:' + key, 'title': title, 'subtitle': subtitle,
+        'icon': 'obsidian', 'fallbackIcon': '◆', 'fallbackColor': '#cba6f7',
+        'keywords': query.lower() + ' obsidian', 'score': 0.95,
+        'provider': 'obsidian', 'actions': actions,
+    }
+
+
+def catalog(query: str) -> list[dict]:
+    launch = ['obsidian'] if shutil.which('obsidian') else ['xdg-open', uri('choose-vault')]
+    return [
+        row('open', 'Open Obsidian', 'Launch Obsidian', query, argv=launch),
+        row('search', 'Search Obsidian', 'Open search in Obsidian; no local note index yet', query, uri('search')),
+        row('daily', 'Obsidian Daily Note', "Open or create today's note; requires Daily notes in Obsidian", query, uri('daily')),
+        row('vaults', 'Obsidian Vault Manager', 'Choose a vault in Obsidian', query, uri('choose-vault')),
+        row('setup', 'Obsidian Setup Guide', 'URI registration instructions; not an in-palette setup screen', query, 'https://help.obsidian.md/uri'),
+        row('cli-guide', 'Obsidian CLI Setup Guide', 'CLI documentation; executable presence does not prove CLI readiness', query, 'https://help.obsidian.md/cli'),
     ]
-    if len(q) >= 3:
-        entries.insert(1, entry(f"New Obsidian Note: {q}", "Create a note named after this query", "obsidian", url=uri("new", name=q), aliases="obsidian new note create markdown", glyph="📝", color=GREEN))
-    if present:
-        entries.append(entry("Obsidian CLI reference", "Open `obsidian help` in a visible terminal", "utilities-terminal", argv=["foot", "--", "sh", "-lc", "obsidian help; printf '\\n(See the README CLI setup section for registration and AI notes.)\\n'; exec $SHELL"], aliases="obsidian cli shell command help ai", glyph="⌨", color=YELLOW))
-    return entries
 
-def score(query: str, e: dict) -> float:
-    title = e["title"].lower(); aliases = e["aliases"]; subtitle = e["subtitle"].lower()
-    if "obsidian".startswith(query): base = 0.72
-    elif title.startswith(query): base = 0.9
-    elif any(word.startswith(query) for word in title.split()): base = 0.82
-    elif query in title: base = 0.7
-    elif any(word.startswith(query) for word in aliases.split()): base = 0.68
-    elif query in aliases or query in subtitle: base = 0.55
-    else: return 0.0
-    return base
 
-def search(query: str) -> list[dict]:
-    q = query.strip()
-    if not q: return []
-    ranked = sorted(((score(q.lower(), e), e) for e in base_entries(q)), key=lambda pair: pair[0], reverse=True)
-    out = []
-    for s, e in ranked:
-        if s == 0.0 or len(out) >= MAX_RESULTS: break
-        out.append({"id": "obsidian:" + e["title"].lower().replace(" ", "-").replace(":", "")[:80], "title": e["title"], "subtitle": e["subtitle"], "icon": e["icon"], "icons": e["icons"], "fallbackIcon": e["fallbackIcon"], "fallbackColor": e["fallbackColor"], "keywords": e["aliases"], "score": s, "provider": "obsidian", "actions": e["actions"]})
-    return out
+def search(query: str, scope: str = '') -> list[dict]:
+    original = query.strip()
+    q = original
+    branded = bool(re.match(r'^obsidian(?:\s|$)', q, re.I))
+    if branded:
+        q = re.sub(r'^obsidian(?:\s+|$)', '', q, count=1, flags=re.I).strip()
+    create = re.fullmatch(r'(?:new|create)\s+note(?:\s+(.*))?', q, flags=re.I | re.S)
+    if scope != 'obsidian' and not branded and not create:
+        return []
+    if not q:
+        return catalog(original)
+    if create:
+        name = (create.group(1) or '').strip()
+        valid = bool(name) and len(name) <= 200 and name not in ('.', '..') and all(c.isprintable() and c not in '/\\' for c in name)
+        if not valid:
+            return [row('new-note-name-required', 'New Obsidian Note — enter a valid name',
+                        'Use obsidian:new note NAME; one filename, no slash or control characters', original)]
+        key = 'new-note-' + hashlib.sha256(name.encode()).hexdigest()[:16]
+        return [row(key, 'New Obsidian Note: ' + name,
+                    'Name: ' + name + '. Destination is chosen by Obsidian; Pallet vault selection is not configured.',
+                    original, uri('new', name=name), confirm=True)]
+    choices = catalog(original)
+    command = q.casefold()
+    if command in ('open', 'launch'):
+        return choices[:1]
+    if command in ('daily', 'today', 'daily note'):
+        return choices[2:3]
+    if command in ('vault', 'vaults', 'vault manager'):
+        return choices[3:4]
+    if command in ('setup', 'settings', 'help'):
+        return choices[4:]
+    if command in ('cli', 'cli help', 'cli setup'):
+        return choices[5:]
+    term = re.sub(r'^(?:search|find)(?:\s+|$)', '', q, count=1, flags=re.I)
+    key = 'search-' + hashlib.sha256(term.encode()).hexdigest()[:16]
+    return [row(key, 'Search Obsidian' + (': ' + term if term else ''),
+                'Search inside Obsidian — no note will be created', original, uri('search', query=term))]
+
 
 def main() -> None:
     for line in sys.stdin:
-        try: msg = json.loads(line)
-        except json.JSONDecodeError: continue
-        if msg.get("op") == "search": print(json.dumps({"id": msg.get("id", ""), "results": search(str(msg.get("query", "")))}), flush=True)
-        elif msg.get("op") == "cancel": print(json.dumps({"id": msg.get("target", ""), "cancelled": True}), flush=True)
-        elif msg.get("op") == "execute": print(json.dumps({"id": msg.get("id", ""), "executed": False}), flush=True)
-if __name__ == "__main__": main()
+        try:
+            msg = json.loads(line)
+        except json.JSONDecodeError:
+            continue
+        if not isinstance(msg, dict):
+            continue
+        op = msg.get('op')
+        if op == 'search':
+            print(json.dumps({'id': msg.get('id', ''), 'results': search(str(msg.get('query', '')), str(msg.get('scope', '')))}), flush=True)
+        elif op == 'cancel':
+            print(json.dumps({'id': msg.get('target', ''), 'cancelled': True}), flush=True)
+        elif op == 'execute':
+            print(json.dumps({'id': msg.get('id', ''), 'executed': False}), flush=True)
+
+if __name__ == '__main__':
+    main()
