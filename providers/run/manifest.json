@@ -1,0 +1,7 @@
+{
+  "name": "run",
+  "description": "Suggest running the typed query as a shell command in a visible terminal",
+  "exec": ["python3", "providers/run/provider.py"],
+  "triggers": [],
+  "capabilities": ["search"]
+}
