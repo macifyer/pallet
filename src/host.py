@@ -82,7 +82,12 @@ class Host:
         names = {p.name for p in self.providers if scope == "" or p.name == scope}
         await self.send_to(names, {"id": self.latest_qid, "op": "search", "query": bare, "scope": scope})
         self.merge_task = asyncio.create_task(self._merge(self.latest_qid, names, scope, bare))
-    async def on_cancel(self, msg): await self.discard_pending()
+    async def on_cancel(self, msg):
+        if str(msg.get("target", "")) != self.latest_qid:
+            return
+        await self.discard_pending()
+        self.latest_qid = None
+        self.merge_task = None
     async def on_execute(self, msg):
         wanted = str(msg.get("provider", ""))
         for provider in self.providers:
@@ -90,6 +95,7 @@ class Host:
                 await provider.send({"id": msg.get("id", ""), "op": "execute", "action": msg.get("action")}); return
     async def _merge(self, qid, names, scope, bare):
         pending = {p.name for p in self.providers if p.alive and p.name in names}
+        unavailable = set(names) - pending
         merged = []; deadline = time.monotonic() + MERGE_TIMEOUT_S
         while pending:
             remaining = deadline - time.monotonic()
@@ -100,7 +106,10 @@ class Host:
             pending.discard(name)
             for result in msg["results"]:
                 if isinstance(result, dict): result.setdefault("provider", name); merged.append(result)
-        self.emit({"id": qid, "results": merged, "scope": scope, "bare": bare})
+        unresolved = sorted(pending | unavailable)
+        if unresolved:
+            log(f"{qid}: no reply from: {unresolved}")
+        self.emit({"id": qid, "results": merged, "scope": scope, "bare": bare, "unresolved": unresolved})
     @staticmethod
     def emit(msg): print(json.dumps(msg, separators=(",", ":")), flush=True)
 

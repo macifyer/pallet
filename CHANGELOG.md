@@ -5,6 +5,26 @@ Release numbers come from the root manifest.json. This changelog starts with
 
 ## [Unreleased]
 
+## [0.9.1]
+
+### Fixed
+- Invalidate query IDs immediately on input changes, before debounce; clear
+  obsolete results and reset the action panel/confirmation at the same time.
+- Reject stale result messages and stop queued searches when hidden or
+  dismissed. Empty scoped queries retain their actual empty bare query.
+- Honor cancellation targets: an old cancel cannot cancel a newer query.
+- Include slow/unavailable selected providers in `unresolved` and display
+  an incomplete-results footer without changing the 500ms merge deadline.
+- Fix the malformed footer JavaScript in the unshipped 0.9.1 draft.
+
+### Tests and limits
+- Add seven host/JavaScript lifecycle tests. Node also parses and exercises
+  extracted QML handler JavaScript; this is not native QML validation.
+- Configure Node.js in CI so JavaScript checks run rather than being skipped.
+- Keep existing tests and release history intact; no tag is created here.
+- Run-suggestion ranking changes, complete action-failure propagation,
+  settings/onboarding, and the remaining roadmap are not included.
+
 ## [0.9.0]
 
 ### Added

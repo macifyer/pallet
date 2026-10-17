@@ -51,7 +51,7 @@ PanelWindow {
                 placeholderTextColor: "#6c7086"
                 background: Rectangle { color: "transparent" }
                 focus: true
-                onTextChanged: { root.selectedIndex = 0; debounce.restart(); }
+                onTextChanged: root.inputChanged()
                 onAccepted: root.executeSelection()
                 Keys.onEscapePressed: root.close()
                 Keys.onDownPressed: root.moveSelection(1)
@@ -87,17 +87,54 @@ PanelWindow {
     }
     ProviderBridge {
         id: bridge
-        onResultsReady: (results, scope, bare) => {
+        onResultsReady: (results, scope, bare, unresolved) => {
+            if (!root.visible) return;
             root.scopeLabel = scope || "All";
-            root.filtered = Fuzzy.rank(bare || searchInput.text, results);
+            root.filtered = Fuzzy.rank(bare, results);
             root.selectedIndex = 0;
+            root.flashMessage = "";
+            if (unresolved.length > 0) {
+                root.flashMessage = qsTr("Incomplete results — no reply from: ") + unresolved.join(", ");
+                flashTimer.restart();
+            }
         }
-        onHostError: message => { root.filtered = [{ id: "pallet.error", title: message, subtitle: qsTr("Check the Python host"), actions: [] }]; }
-        onActionFailed: { root.flashMessage = qsTr("That action could not be completed — the target may already be gone."); flashTimer.restart(); }
+        onHostError: message => {
+            if (!root.visible) return;
+            root.filtered = [{ id: "pallet.error", title: message, subtitle: qsTr("Check the Python host"), actions: [] }];
+        }
+        onActionFailed: {
+            if (!root.visible) return;
+            root.flashMessage = qsTr("That action could not be completed — the target may already be gone.");
+            flashTimer.restart();
+        }
     }
     Timer { id: debounce; interval: 80; onTriggered: root.runSearch() }
     Timer { id: flashTimer; interval: 2500; onTriggered: root.flashMessage = "" }
-    onVisibleChanged: if (visible) searchInput.forceActiveFocus(); else root.panelOpen = false
+    onVisibleChanged: {
+        if (visible) {
+            searchInput.forceActiveFocus();
+        } else {
+            debounce.stop();
+            root.invalidateSearch();
+        }
+    }
+    function invalidateSearch(): void {
+        bridge.cancel();
+        root.filtered = [];
+        root.selectedIndex = 0;
+        root.panelOpen = false;
+        root.flashMessage = "";
+        root.scopeLabel = "All";
+        flashTimer.stop();
+        actionPanel.reset();
+    }
+    function inputChanged(): void {
+        // Invalidate on the keystroke, not after the debounce window.
+        root.invalidateSearch();
+        debounce.stop();
+        if (root.visible && searchInput.text.trim().length > 0)
+            debounce.restart();
+    }
     function open(): void { visible = true; scopeLabel = "All"; }
     function close(): void {
         if (actionPanel.confirming) { actionPanel.cancelConfirm(); return; }
@@ -105,12 +142,18 @@ PanelWindow {
         dismiss();
     }
     function dismiss(): void {
-        visible = false; searchInput.text = ""; root.filtered = []; root.selectedIndex = 0; root.panelOpen = false; root.flashMessage = ""; root.scopeLabel = "All"; actionPanel.reset();
+        debounce.stop();
+        root.invalidateSearch();
+        visible = false;
+        searchInput.text = "";
     }
     function toggle(): void { visible ? close() : open(); }
     function runSearch(): void {
         const q = searchInput.text.trim();
-        if (q.length === 0) { root.filtered = []; root.panelOpen = false; return; }
+        if (!root.visible || q.length === 0) {
+            root.invalidateSearch();
+            return;
+        }
         bridge.search(q);
     }
     function moveSelection(step: int): void {
