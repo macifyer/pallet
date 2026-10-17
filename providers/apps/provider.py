@@ -1,160 +1,235 @@
 #!/usr/bin/env python3
-"""Search installed applications via XDG .desktop entries.
+"""Discover XDG desktop applications, including Terminal=true entries.
 
-Advisory-scored results; final ordering happens in the frontend's Fuzzy.rank.
-Launch actions are raw argv arrays — never shell strings.
-
-Freshness: install anything the standard way (pacman, AUR, flatpak, snap,
-AppImage helpers, Makefile one-liners) and it lands as a .desktop file in a
-desktop dir. This provider watches those directories' mtimes and reloads
-within seconds of change, so newly installed apps appear here the moment
-they appear in the native Omarchy menu — no shell restart.
-
-Entries are skipped when their binary cannot be resolved: TryExec when the
-file declares it (per the freedesktop spec), otherwise the Exec argv[0].
-This hides the .desktop debris an uninstall leaves behind.
+Search never launches programs. Terminal entries use xdg-terminal-exec when
+available, then supported terminal fallbacks. Executable-only tools without
+desktop entries are outside this provider's scope.
 """
-
+from __future__ import annotations
 import json
 import os
+from pathlib import Path
 import shlex
 import shutil
 import sys
 import time
-from pathlib import Path
 
-XDG_DIRS = [
-    Path.home() / ".local/share/applications",
-    Path.home() / ".local/share/flatpak/exports/share/applications",
-    Path("/usr/local/share/applications"),
-    Path("/usr/share/applications"),
-    Path("/var/lib/flatpak/exports/share/applications"),
-    Path("/var/lib/snapd/desktop/applications"),
-]
-
-FIELD_MARK = "%"
 MAX_RESULTS = 15
-MAX_DESKTOP_ACTIONS = 6  # panel caps at 320px; 6 + Launch + Copy name fits
-CHECK_TTL_S = 10         # how often we re-check directory mtimes
-
+MAX_DESKTOP_ACTIONS = 6
+CHECK_TTL_S = 10
 _apps: list[dict] = []
-_sig: tuple | None = None
-_checked_at = 0.0
+_checked_at = float('-inf')
+
+
+def desktop_dirs() -> list[Path]:
+    home = Path.home()
+    user = Path(os.environ.get('XDG_DATA_HOME') or home / '.local/share')
+    if not user.is_absolute():
+        user = home / '.local/share'
+    system = os.environ.get('XDG_DATA_DIRS') or '/usr/local/share:/usr/share'
+    roots = [user / 'applications', user / 'flatpak/exports/share/applications']
+    roots += [Path(p) / 'applications' for p in system.split(':') if p and Path(p).is_absolute()]
+    roots += [Path('/var/lib/flatpak/exports/share/applications'), Path('/var/lib/snapd/desktop/applications')]
+    return list(dict.fromkeys(roots))
+
 
 def resolves(token: str) -> bool:
-    if not token: return False
-    if "/" in token: return os.access(token, os.X_OK)
+    if not token:
+        return False
+    if '/' in token:
+        return Path(token).is_absolute() and Path(token).is_file() and os.access(token, os.X_OK)
     return shutil.which(token) is not None
 
-def split_exec(exec_line: str) -> list[str]:
-    try: tokens = shlex.split(exec_line, posix=True)
-    except ValueError: tokens = exec_line.split()
-    return [t for t in tokens if not t.startswith(FIELD_MARK)]
+
+def split_exec(line: str, name: str = '', icon: str = '', desktop: str = '') -> list[str]:
+    try:
+        tokens = shlex.split(line, posix=True)
+    except ValueError:
+        return []
+    out = []
+    for token in tokens:
+        if token in ('%f', '%F', '%u', '%U', '%d', '%D', '%n', '%N', '%v', '%m'):
+            continue
+        if token == '%i':
+            if icon:
+                out += ['--icon', icon]
+            continue
+        if token in ('%c', '%k'):
+            out.append(name if token == '%c' else desktop)
+            continue
+        # Unknown or embedded field codes are not guessed. %% is literal %.
+        if '%' in token.replace('%%', ''):
+            return []
+        out.append(token.replace('%%', '%'))
+    return out
+
+
+def terminal_argv(argv: list[str]) -> list[str] | None:
+    for executable, prefix in (
+        ('xdg-terminal-exec', ['xdg-terminal-exec', '--']),
+        ('foot', ['foot', '--']),
+        ('kitty', ['kitty', '--']),
+        ('alacritty', ['alacritty', '-e']),
+        ('xterm', ['xterm', '-e']),
+    ):
+        if shutil.which(executable):
+            return prefix + argv
+    return None
+
 
 def parse_desktop(path: Path) -> dict | None:
-    try: text = path.read_text(encoding="utf-8", errors="replace")
-    except OSError: return None
-    section: str | None = None
-    fields: dict[str, str] = {}
-    action_groups: dict[str, dict[str, str]] = {}
+    try:
+        text = path.read_text(encoding='utf-8', errors='replace')
+    except OSError:
+        return None
+    section = ''
+    fields = {}
+    groups = {}
     for line in text.splitlines():
         line = line.strip()
-        if not line or line.startswith("#"): continue
-        if line.startswith("[") and line.endswith("]"): section = line[1:-1]; continue
-        if not section or "=" not in line: continue
-        key, _, value = line.partition("=")
-        if section == "Desktop Entry": fields.setdefault(key, value)
-        elif section.startswith("Desktop Action "):
-            action_groups.setdefault(section.removeprefix("Desktop Action "), {}).setdefault(key, value)
-    if fields.get("Type", "Application") != "Application": return None
-    lowered = {k.lower(): v for k, v in fields.items()}
-    if lowered.get("nodisplay") == "true" or lowered.get("hidden") == "true": return None
-    name = fields.get("Name", "")
-    argv = split_exec(fields.get("Exec", ""))
-    if not name or not argv: return None
-    if lowered.get("terminal") == "true": return None
-    try_exec = fields.get("TryExec", "")
-    if try_exec and not resolves(try_exec): return None
-    if not resolves(argv[0]): return None
-    desktop_actions: list[dict] = []
-    for action_id in (a for a in fields.get("Actions", "").split(";") if a):
-        group = action_groups.get(action_id, {})
-        action_name = group.get("Name", "").strip()
-        action_argv = split_exec(group.get("Exec", ""))
-        if not action_name or not action_argv or not resolves(action_argv[0]): continue
-        desktop_actions.append({"title": action_name, "argv": action_argv})
-        if len(desktop_actions) >= MAX_DESKTOP_ACTIONS: break
-    return {"name": name, "subtitle": fields.get("GenericName") or fields.get("Comment", ""), "icon": fields.get("Icon", ""), "argv": argv, "desktop_actions": desktop_actions, "keywords": fields.get("Keywords", "").replace(";", " ").lower()}
+        if not line or line.startswith('#'):
+            continue
+        if line.startswith('[') and line.endswith(']'):
+            section = line[1:-1]
+            continue
+        if '=' not in line:
+            continue
+        key, _, value = line.partition('=')
+        if section == 'Desktop Entry':
+            fields.setdefault(key, value)
+        elif section.startswith('Desktop Action '):
+            groups.setdefault(section[15:], {}).setdefault(key, value)
+    if fields.get('Type', 'Application') != 'Application':
+        return None
+    if any(fields.get(k, '').lower() == 'true' for k in ('Hidden', 'NoDisplay')):
+        return None
+    current = set(filter(None, os.environ.get('XDG_CURRENT_DESKTOP', '').split(':')))
+    only = set(filter(None, fields.get('OnlyShowIn', '').split(';')))
+    excluded = set(filter(None, fields.get('NotShowIn', '').split(';')))
+    if (only and not current.intersection(only)) or current.intersection(excluded):
+        return None
+    name = fields.get('Name', '').strip()
+    icon = fields.get('Icon', '')
+    argv = split_exec(fields.get('Exec', ''), name, icon, str(path))
+    if not name or not argv or not resolves(argv[0]):
+        return None
+    if fields.get('TryExec') and not resolves(fields['TryExec']):
+        return None
+    actions = []
+    for action_id in filter(None, fields.get('Actions', '').split(';')):
+        group = groups.get(action_id, {})
+        title = group.get('Name', '').strip()
+        command = split_exec(group.get('Exec', ''), name, icon, str(path))
+        if title and command and resolves(command[0]):
+            actions.append({'title': title, 'argv': command})
+        if len(actions) >= MAX_DESKTOP_ACTIONS:
+            break
+    return {
+        'name': name, 'subtitle': fields.get('GenericName') or fields.get('Comment', ''),
+        'icon': icon, 'argv': argv, 'desktop_actions': actions,
+        'terminal': fields.get('Terminal', '').lower() == 'true',
+        'keywords': (fields.get('Keywords', '').replace(';', ' ') + ' ' + Path(argv[0]).name).lower(),
+    }
+
 
 def load_apps() -> list[dict]:
-    seen: set[str] = set()
-    apps: list[dict] = []
-    for directory in XDG_DIRS:
-        if not directory.is_dir(): continue
-        for desktop in sorted(directory.glob("*.desktop")):
-            if desktop.name in seen: continue
-            seen.add(desktop.name)
+    seen = set()
+    apps = []
+    for directory in desktop_dirs():
+        if not directory.is_dir():
+            continue
+        try:
+            entries = sorted(directory.rglob('*.desktop'))
+        except OSError:
+            continue
+        for desktop in entries:
+            desktop_id = desktop.relative_to(directory).as_posix().replace('/', '-')
+            if desktop_id in seen:
+                continue
+            # Hidden/user overrides suppress lower-priority copies too.
+            seen.add(desktop_id)
             app = parse_desktop(desktop)
-            if app is not None: apps.append(app)
-    apps.sort(key=lambda a: a["name"].lower())
-    return apps
+            if app is not None:
+                app['desktop_id'] = desktop_id
+                apps.append(app)
+    return sorted(apps, key=lambda a: (a['name'].lower(), a['desktop_id']))
 
-def dirs_signature() -> tuple:
-    sig = []
-    for d in XDG_DIRS:
-        try: sig.append((str(d), d.stat().st_mtime))
-        except OSError: sig.append((str(d), 0.0))
-    return tuple(sig)
 
-def ensure_fresh() -> None:
-    global _apps, _sig, _checked_at
-    now = time.time()
-    if now - _checked_at < CHECK_TTL_S: return
-    _checked_at = now
-    current = dirs_signature()
-    if current != _sig:
+def ensure_fresh(force: bool = False) -> None:
+    global _apps, _checked_at
+    now = time.monotonic()
+    if force or now - _checked_at >= CHECK_TTL_S:
         _apps = load_apps()
-        _sig = current
+        _checked_at = now
+
 
 def score(query: str, app: dict) -> float:
-    name = app["name"].lower()
-    if name.startswith(query): return 0.95
-    if any(word.startswith(query) for word in name.split()): return 0.85
-    if query in name: return 0.7
-    if query in app["subtitle"].lower() or query in app["keywords"]: return 0.45
+    name = app['name'].lower()
+    if name.startswith(query):
+        return 0.95
+    if any(word.startswith(query) for word in name.split()):
+        return 0.85
+    if query in name:
+        return 0.7
+    if query in app['subtitle'].lower() or query in app['keywords']:
+        return 0.45
     return 0.0
 
+
 def actions_for(app: dict) -> list[dict]:
-    actions = [{"type": "launch", "title": "Launch", "argv": app["argv"]}]
-    for desktop_action in app["desktop_actions"]:
-        actions.append({"type": "launch", "title": desktop_action["title"], "argv": desktop_action["argv"]})
-    actions.append({"type": "copy", "title": "Copy name", "text": app["name"]})
+    def wrap(argv):
+        return terminal_argv(argv) if app['terminal'] else argv
+    command = wrap(app['argv'])
+    if command is None:
+        return []
+    actions = [{'type': 'launch', 'title': 'Open in terminal' if app['terminal'] else 'Launch', 'argv': command}]
+    for extra in app['desktop_actions']:
+        command = wrap(extra['argv'])
+        if command is not None:
+            actions.append({'type': 'launch', 'title': extra['title'], 'argv': command})
+    actions.append({'type': 'copy', 'title': 'Copy name', 'text': app['name']})
     return actions
+
 
 def search(query: str) -> list[dict]:
     q = query.strip().lower()
-    if not q: return []
+    if not q:
+        return []
     ensure_fresh()
     ranked = sorted(((score(q, app), app) for app in _apps), key=lambda pair: pair[0], reverse=True)
-    out: list[dict] = []
-    for s, app in ranked:
-        if s == 0.0 or len(out) >= MAX_RESULTS: break
-        out.append({"id": f"apps:{app['name']}", "title": app["name"], "subtitle": app["subtitle"], "icon": app["icon"], "keywords": app["keywords"], "score": s, "provider": "apps", "actions": actions_for(app)})
-    return out
+    results = []
+    for rank, app in ranked:
+        if rank <= 0 or len(results) >= MAX_RESULTS:
+            break
+        actions = actions_for(app)
+        subtitle = app['subtitle']
+        if app['terminal']:
+            subtitle = 'Terminal application' + (' — ' + subtitle if subtitle else '')
+            if not actions:
+                subtitle = 'No terminal launcher available — install/configure xdg-terminal-exec or a supported terminal'
+        results.append({
+            'id': 'apps:' + app['desktop_id'], 'title': app['name'], 'subtitle': subtitle,
+            'icon': app['icon'], 'fallbackIcon': '⌨' if app['terminal'] else '◆',
+            'keywords': app['keywords'], 'score': rank, 'provider': 'apps', 'actions': actions,
+        })
+    return results
+
 
 def main() -> None:
-    global _apps, _sig, _checked_at
-    _apps = load_apps()
-    _sig = dirs_signature()
-    _checked_at = time.time()
+    ensure_fresh(force=True)
     for line in sys.stdin:
-        try: msg = json.loads(line)
-        except json.JSONDecodeError: continue
-        if msg.get("op") == "search":
-            print(json.dumps({"id": msg.get("id", ""), "results": search(str(msg.get("query", "")))}), flush=True)
-        elif msg.get("op") == "cancel":
-            print(json.dumps({"id": msg.get("target", ""), "cancelled": True}), flush=True)
-        elif msg.get("op") == "execute":
-            print(json.dumps({"id": msg.get("id", ""), "executed": False}), flush=True)
+        try:
+            msg = json.loads(line)
+        except json.JSONDecodeError:
+            continue
+        if not isinstance(msg, dict):
+            continue
+        if msg.get('op') == 'search':
+            print(json.dumps({'id': msg.get('id', ''), 'results': search(str(msg.get('query', '')))}), flush=True)
+        elif msg.get('op') == 'cancel':
+            print(json.dumps({'id': msg.get('target', ''), 'cancelled': True}), flush=True)
+        elif msg.get('op') == 'execute':
+            print(json.dumps({'id': msg.get('id', ''), 'executed': False}), flush=True)
 
-if __name__ == "__main__": main()
+if __name__ == '__main__':
+    main()

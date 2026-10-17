@@ -5,6 +5,31 @@ Release numbers come from the root manifest.json. This changelog starts with
 
 ## [Unreleased]
 
+## [0.9.0]
+
+### Added
+- Discover and launch Terminal=true desktop applications and their declared
+  desktop actions, using xdg-terminal-exec or supported terminal fallbacks.
+- Resolve application directories from XDG_DATA_HOME and XDG_DATA_DIRS,
+  with Flatpak/Snap export fallbacks and recursive desktop-file discovery.
+- Identify application results by desktop-file ID instead of display name.
+- Report missing terminal launchers as non-executable result rows.
+- Add 12 isolated application-discovery tests and a staged development roadmap.
+
+### Fixed
+- Respect Hidden, NoDisplay, OnlyShowIn, NotShowIn, and TryExec filtering;
+  higher-priority hidden desktop entries suppress lower-priority copies.
+- Refresh the application catalog on a search after the 10-second interval,
+  including in-place edits, new binaries, and removed desktop entries.
+- Preserve quoted arguments, handle supported standalone Exec field codes,
+  and reject malformed or unknown codes instead of guessing shell commands.
+
+### Scope
+- Desktop entries only: arbitrary PATH discovery, saved TUI profiles,
+  stale-query UI handling, and provider diagnostics are separate follow-ups.
+- Existing result IDs change from display-name-based to desktop-ID-based.
+- Automated fixtures do not prove terminal launching on a real Omarchy session.
+
 ## [0.8.2]
 
 ### Fixed
