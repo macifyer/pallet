@@ -70,7 +70,6 @@ Rectangle {
 
                 Text {
                     textFormat: Text.PlainText
-            textFormat: Text.PlainText
                     anchors.left: parent.left
                     anchors.leftMargin: 10
                     anchors.verticalCenter: parent.verticalCenter
