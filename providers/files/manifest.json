@@ -1,7 +1,13 @@
 {
   "name": "files",
   "description": "Search files and directories under $HOME",
-  "exec": ["python3", "providers/files/provider.py"],
+  "exec": [
+    "python3",
+    "providers/files/provider.py"
+  ],
   "triggers": [],
-  "capabilities": ["search"]
+  "capabilities": [
+    "search"
+  ],
+  "minQuery": 3
 }
