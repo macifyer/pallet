@@ -8,8 +8,10 @@ the user's login shell in a real, inspectable window. Because this is the
 deliberate boundary where typed text becomes a command, the action carries
 danger: confirm — the two-Enter sheet is the user's final say.
 
-Scored low on purpose: a real app/file/action that matches should always
-outrank the command suggestion. It is a floor, never a lid.
+Scored low on purpose and marked `"fallback": true`: the frontend ranks
+fallbacks below every real match regardless of score, so "Run:" is a floor,
+never a lid. The id carries the query so selection-follow and confirmation
+binding can never mistake one typed command for another.
 """
 from __future__ import annotations
 import json
@@ -22,7 +24,8 @@ def search(query: str) -> list[dict]:
     if len(q) < MIN_LEN: return []
     shown = q if len(q) <= 64 else q[:61] + "..."
     return [{
-        "id": "run:verbatim",
+        "id": "run:" + q,
+        "fallback": True,
         "title": f"Run: {shown}",
         "subtitle": "Run as a command in a foot terminal — executes verbatim",
         "icon": "utilities-terminal",
@@ -53,6 +56,6 @@ def main() -> None:
         elif msg.get("op") == "cancel":
             print(json.dumps({"id": msg.get("target", ""), "cancelled": True}), flush=True)
         elif msg.get("op") == "execute":
-            print(json.dumps({"id": msg.get("id", ""), "executed": False}), flush=True)
+            print(json.dumps({"id": msg.get("id", ""), "executed": False, "error": "run actions are launched by the host"}), flush=True)
 
 if __name__ == "__main__": main()
