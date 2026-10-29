@@ -32,7 +32,7 @@ const sandbox = {root,
     flashTimer: {stop() {}, restart() {}},
     debounce: {stop() {stopped++;}, restart() {starts++;}},
     searchInput: {text: 'new'}, qsTr: s => s,
-    Fuzzy: fuzzyContext
+    Fuzzy: fuzzyContext, QueryState: context
 };
 function method(name) {
     const match = palette.match(new RegExp('function ' + name + '\\(\\): void \\{([\\s\\S]*?)\\n    \\}'));
@@ -45,7 +45,8 @@ const runSearch = method('runSearch');
 inputChanged();
 assert.equal(cancels, 1);
 assert.equal(resets, 1);
-assert.equal(root.filtered.length, 0);
+// Nothing to re-rank yet: the rows already shown stay until the answer lands.
+assert.deepEqual(root.filtered, ['old']);
 assert.equal(root.panelOpen, false);
 assert.equal(starts, 1);
 assert.equal(searches, 0);
@@ -53,6 +54,7 @@ runSearch();
 assert.equal(searches, 1);
 sandbox.searchInput.text = '';
 inputChanged();
+assert.equal(root.filtered.length, 0, 'an empty query blanks the list');
 assert.equal(starts, 1);
 root.visible = false;
 sandbox.searchInput.text = 'hidden';
@@ -119,8 +121,72 @@ inputChanged();
 assert.equal(cancels, cancelsBefore + 1);
 assert.deepEqual(Array.from(root.filtered, r => r.id), ['b']);
 assert.equal(root.panelOpen, false);
-// Editing backwards clears instead of showing stale rows.
+// Editing backwards re-ranks the same answer against the shorter text.
+sandbox.searchInput.text = 'fi';
+inputChanged();
+assert.deepEqual(Array.from(root.filtered, r => r.id), ['b', 'c']);
+// Nothing in the last answer matches: keep what is shown, never blank.
 sandbox.searchInput.text = 'xyz';
 inputChanged();
-assert.equal(root.filtered.length, 0);
+assert.deepEqual(Array.from(root.filtered, r => r.id), ['b', 'c']);
+assert.equal(root.statusText, 'searching…');
+
+// localBare follows scope prefixes of the query the answer was for.
+assert.equal(context.localBare(' conf ', 'con', 'con'), 'conf');
+assert.equal(context.localBare('f: conf', 'f: con', 'con'), 'conf');
+assert.equal(context.localBare('f:conf', 'f: con', 'con'), 'conf');
+assert.equal(context.localBare('a: conf', 'f: con', 'con'), null);
+assert.equal(context.localBare('co', '', ''), 'co');
+// carryOver keeps pending providers' previous rows until the final message.
+const prev = [row('files', 'f1', 'config'), row('omarchy', 'o1', 'Config'), row('menus', 'm1', 'Configure')];
+let merged = context.carryOver(prev, [row('omarchy', 'o2', 'Config again')], ['files', 'menus'], false);
+assert.deepEqual(Array.from(merged, r => r.id), ['o2', 'f1', 'm1']);
+merged = context.carryOver(prev, [row('files', 'f2', 'config.bak')], ['files'], false);
+assert.deepEqual(Array.from(merged, r => r.id), ['f2'], 'a provider that answered (even partially) is not carried');
+merged = context.carryOver(prev, [row('omarchy', 'o2', 'x')], ['files'], true);
+assert.deepEqual(Array.from(merged, r => r.id), ['o2'], 'final messages are authoritative');
+
+// Typing "con" -> "conf" -> "config": no blank frame, no stale rows after an
+// answer, stale ids dropped, and the final view is not reshuffled by
+// providers that answered late.
+const bridgeState = context.create();
+let sent = null;
+sandbox.bridge.search = q => { sent = {id: context.begin(bridgeState), q}; };
+sandbox.bridge.cancel = () => { cancels++; context.cancel(bridgeState); };
+function hostReply(id, q, results, pending) {
+    const msg = {id, results};
+    if (!context.accepts(bridgeState, msg)) return false;
+    receive(results, '', q, [], {final: pending.length === 0, pending, failed: [], incremental: false, query: q});
+    return true;
+}
+root.lastRaw = []; root.lastQuery = ''; root.lastBare = ''; root.filtered = [];
+const omarchy = [row('omarchy', 'cfg', 'Config'), row('omarchy', 'upd', 'Update Config: Tmux')];
+const files = [row('files', 'gh', 'config'), row('files', 'dot', '.config')];
+const apps = [row('apps', 'cons', 'Console')];
+sandbox.searchInput.text = 'con'; inputChanged(); runSearch();
+const conId = sent.id;
+assert(hostReply(conId, 'con', omarchy.concat(apps), ['files']));
+assert(hostReply(conId, 'con', omarchy.concat(files, apps), []));
+const conRows = Array.from(root.filtered, r => r.id);
+sandbox.searchInput.text = 'conf'; inputChanged();
+assert(root.filtered.length > 0, 'no blank frame while "conf" is in flight');
+assert(!Array.from(root.filtered, r => r.id).includes('cons'), 'local re-rank drops rows that no longer match');
+assert(!hostReply(conId, 'con', apps, []), 'a stale reply for the old id is dropped');
+runSearch();
+const confId = sent.id;
+// The fast provider answers first; files is still pending and keeps its rows.
+assert(hostReply(confId, 'conf', omarchy, ['files']));
+assert.deepEqual(Array.from(root.filtered, r => r.provider).sort(), ['files', 'files', 'omarchy', 'omarchy']);
+assert(hostReply(confId, 'conf', omarchy.concat(files), []));
+const confFinal = Array.from(root.filtered, r => r.id);
+sandbox.searchInput.text = 'config'; inputChanged();
+const configLocal = Array.from(root.filtered, r => r.id);
+assert.deepEqual(configLocal.slice().sort(), confFinal.slice().sort(), 'same rows, re-ranked for "config"');
+runSearch();
+assert(hostReply(sent.id, 'config', omarchy, ['files']));
+assert.deepEqual(Array.from(root.filtered, r => r.id), configLocal, 'partial merge does not reorder');
+assert(hostReply(sent.id, 'config', omarchy.concat(files), []));
+assert.deepEqual(Array.from(root.filtered, r => r.id), configLocal, 'final does not reorder');
+assert.equal(root.lastQuery, 'config');
+assert.notDeepEqual(conRows, []);
 console.log('Query state and extracted QML JavaScript checks passed (not a native QML test)');

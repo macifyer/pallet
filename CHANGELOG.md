@@ -79,6 +79,17 @@ not yet exercised in the real Quickshell overlay on Hyprland.
 - Files "open in editor" prefers `omarchy-launch-editor`; "terminal here"
   uses `xdg-terminal-exec --dir=`.
 
+### Fixed (Omarchy VM smoke test)
+- Typing no longer flickers or shows stale rows. While a query is in
+  flight the previous answer is re-ranked locally against the new text
+  (also when editing backwards or across a scope prefix that still
+  matches); the list is only blanked for an empty query. Streamed partial
+  messages keep the previous rows of providers that have not answered yet,
+  so the 600 ms final message no longer reshuffles the list; the final
+  message is authoritative. The re-rank now uses the query text that was
+  sent for an answer, not the input text at the moment the reply landed.
+  Replies for old query ids are still dropped.
+
 ## [0.9.1]
 
 ### Fixed

@@ -5,9 +5,10 @@ import "QueryState.js" as QueryState
 
 Process {
     id: root
-    // meta: { final, pending, failed, incremental } — incremental is true for
-    // follow-up messages under the query id already delivered, so the window
-    // can merge without resetting the selection.
+    // meta: { final, pending, failed, incremental, query } — incremental is
+    // true for follow-up messages under the query id already delivered, so the
+    // window can merge without resetting the selection; query is the text
+    // sent for that id (not whatever the input holds when the reply lands).
     signal resultsReady(var results, string scope, string bare, var unresolved, var meta)
     signal hostError(string message)
     signal actionFailed(string message)
@@ -19,6 +20,7 @@ Process {
     readonly property string hostPath: Quickshell.env("PALLET_HOST") ?? localHostPath
     property var queryState: QueryState.create()
     property string deliveredId: ""
+    property string activeQuery: ""
     property int actionCounter: 0
     command: ["python3", hostPath]
     running: true
@@ -38,7 +40,8 @@ Process {
                             final: msg.final !== false,
                             pending: Array.isArray(msg.pending) ? msg.pending : [],
                             failed: Array.isArray(msg.failed) ? msg.failed : [],
-                            incremental: incremental
+                            incremental: incremental,
+                            query: root.activeQuery
                         });
                 }
             } else if (msg.executed === false) {
@@ -68,6 +71,7 @@ Process {
             return;
         }
         const id = QueryState.begin(root.queryState);
+        root.activeQuery = query;
         root.write(JSON.stringify({ id: id, op: "search", query: query }) + "\n");
     }
     // Overlay opened: let providers refresh caches before the first keystroke.

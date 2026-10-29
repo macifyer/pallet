@@ -4,6 +4,7 @@ import QtQuick.Layouts
 import Quickshell
 import Quickshell.Wayland
 import "Fuzzy.js" as Fuzzy
+import "QueryState.js" as QueryState
 import "."
 
 PanelWindow {
@@ -18,8 +19,9 @@ PanelWindow {
     // Selection follows the same result across streamed updates once the
     // user has moved it; until then the top row stays selected.
     property bool userMoved: false
-    // Last raw host results and the query they answered, used to re-filter
-    // instantly on the next keystroke while the host catches up.
+    // Last raw host results, the query text sent for them and the bare query
+    // the host matched. Used to re-rank instantly on the next keystroke while
+    // the host catches up, and to keep slow providers' rows while streaming.
     property var lastRaw: []
     property string lastQuery: ""
     property string lastBare: ""
@@ -112,10 +114,13 @@ PanelWindow {
             }
             const selected = Fuzzy.keyOf(root.filtered[root.selectedIndex]);
             root.scopeLabel = scope || "All";
-            root.lastRaw = results;
-            root.lastQuery = searchInput.text;
+            // Until the final message, providers that have not answered keep
+            // their previous rows (re-ranked below), so nothing blinks out.
+            const rows = QueryState.carryOver(root.lastRaw, results, info.pending, info.final);
+            root.lastRaw = rows;
+            root.lastQuery = typeof info.query === "string" ? info.query : searchInput.text.trim();
             root.lastBare = bare;
-            root.filtered = Fuzzy.rank(bare, results);
+            root.filtered = Fuzzy.rank(bare, rows);
             const kept = root.userMoved ? Fuzzy.indexOfKey(root.filtered, selected) : -1;
             root.selectedIndex = kept >= 0 ? kept : 0;
             if (kept < 0) root.userMoved = false;
@@ -174,28 +179,26 @@ PanelWindow {
     }
     function inputChanged(): void {
         // Invalidate on the keystroke, not after the debounce window: the
-        // old query is cancelled and any open panel or confirmation closes.
-        const text = searchInput.text;
+        // old query is cancelled (its late replies are dropped) and any open
+        // panel or confirmation closes. The list is only blanked for an empty
+        // query: otherwise the last answer is re-ranked locally against the
+        // new text, or kept as shown, until the new answer arrives.
+        const text = searchInput.text.trim();
         const raw = root.lastRaw || [];
-        const extends_ = root.lastQuery.length > 0 && text.startsWith(root.lastQuery);
-        const bare = extends_ ? root.lastBare + text.substring(root.lastQuery.length) : "";
+        const shown = root.filtered.filter(r => r && r.id !== "pallet.error");
+        const bare = QueryState.localBare(text, root.lastQuery, root.lastBare);
         root.invalidateSearch();
         debounce.stop();
-        if (root.visible && text.trim().length > 0) {
-            // Typing forward only narrows a fuzzy match, so re-rank the
-            // previous answer locally for an instant first paint.
-            if (extends_ && raw.length > 0) {
-                root.filtered = Fuzzy.rank(bare, raw);
-                root.statusText = qsTr("searching…");
-            } else {
-                root.lastRaw = [];
-                root.lastQuery = "";
-            }
-            debounce.restart();
-        } else {
+        if (!root.visible || text.length === 0) {
             root.lastRaw = [];
             root.lastQuery = "";
+            root.lastBare = "";
+            return;
         }
+        const local = bare !== null && raw.length > 0 ? Fuzzy.rank(bare, raw) : [];
+        root.filtered = local.length > 0 ? local : shown;
+        root.statusText = qsTr("searching…");
+        debounce.restart();
     }
     function applyDeferred(): void {
         const update = root.deferredUpdate;
@@ -216,6 +219,7 @@ PanelWindow {
         searchInput.text = "";
         root.lastRaw = [];
         root.lastQuery = "";
+        root.lastBare = "";
     }
     function toggle(): void { visible ? close() : open(); }
     function runSearch(): void {
