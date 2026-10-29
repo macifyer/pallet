@@ -208,8 +208,14 @@ PanelWindow {
     }
     function open(): void { visible = true; scopeLabel = "All"; }
     function close(): void {
-        if (actionPanel.confirming) { actionPanel.cancelConfirm(); return; }
-        if (root.panelOpen) { root.panelOpen = false; root.applyDeferred(); return; }
+        // Esc on a confirmation card or the action list cancels it and goes
+        // straight back to the results (not from the card to the actions).
+        if (actionPanel.confirming || root.panelOpen) {
+            root.panelOpen = false;
+            actionPanel.reset();
+            root.applyDeferred();
+            return;
+        }
         dismiss();
     }
     function dismiss(): void {

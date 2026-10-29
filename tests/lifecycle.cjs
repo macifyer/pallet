@@ -189,4 +189,24 @@ assert(hostReply(sent.id, 'config', omarchy.concat(files), []));
 assert.deepEqual(Array.from(root.filtered, r => r.id), configLocal, 'final does not reorder');
 assert.equal(root.lastQuery, 'config');
 assert.notDeepEqual(conRows, []);
+
+// Esc on a confirmation card returns straight to the results list, cancelling
+// the confirmation; a second Esc then closes the overlay.
+{
+    let confirming = true, cancelled = 0, resetCount = 0, dismissed = 0, replayed = 0;
+    const panel = {get confirming() { return confirming; }, cancelConfirm() { cancelled++; confirming = false; },
+        reset() { resetCount++; confirming = false; }};
+    const escBox = Object.assign({}, sandbox, {actionPanel: panel, root: {panelOpen: true,
+        applyDeferred() { replayed++; }}, dismiss() { dismissed++; }});
+    const m = palette.match(/function close\(\): void \{([\s\S]*?)\n    \}/);
+    assert(m, 'missing QML method: close');
+    const close = vm.runInNewContext('(function() {' + m[1] + '\n})', escBox);
+    close();
+    assert.equal(confirming, false, 'confirmation cancelled');
+    assert.equal(escBox.root.panelOpen, false, 'action panel closed, results list shown');
+    assert.equal(replayed, 1, 'deferred streamed update applied');
+    assert.equal(dismissed, 0, 'overlay stays open');
+    close();
+    assert.equal(dismissed, 1, 'second Esc closes the overlay');
+}
 console.log('Query state and extracted QML JavaScript checks passed (not a native QML test)');

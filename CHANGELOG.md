@@ -96,6 +96,9 @@ not yet exercised in the real Quickshell overlay on Hyprland.
   Update Config: … rows before ~/.config/ghostty/config, and "theme" lists
   the Theme menu row before ~/.local/state/omarchy/current/theme. An
   exact-named file no longer gets a bonus over an exact-named command.
+- Esc on a confirmation card (for example Shutdown) cancels it and returns
+  straight to the results list instead of to the Actions panel; a second
+  Esc closes the overlay.
 
 ## [0.9.1]
 
