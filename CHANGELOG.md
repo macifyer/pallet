@@ -99,6 +99,15 @@ not yet exercised in the real Quickshell overlay on Hyprland.
 - Esc on a confirmation card (for example Shutdown) cancels it and returns
   straight to the results list instead of to the Actions panel; a second
   Esc closes the overlay.
+- Timing tests no longer fail on slow machines (TCG VM): `tests/timing.py`
+  scales time limits by `PALLET_TEST_TIME_SCALE` or a factor calibrated
+  from Python start-up time (never below 1). The menus no-accessibility test
+  keeps the provider's stdin open until it replies (closing it first lost
+  the walk worker's answer whenever hyprctl reported a focused window); the
+  guard-timeout test uses a scaled budget and a guard that always outlives
+  it; the streaming test warms the host up first and checks the first emit
+  against the slow provider's reply (fast row only, not final, `slow`
+  pending, earlier than the slow reply) as well as a scaled 0.3 s bound.
 
 ## [0.9.1]
 

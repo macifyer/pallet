@@ -9,6 +9,8 @@ import tempfile
 import unittest
 
 ROOT = Path(__file__).resolve().parents[1]
+sys.path.insert(0, str(ROOT / 'tests'))
+from timing import budget  # noqa: E402
 SPEC = importlib.util.spec_from_file_location('omarchy_provider', ROOT / 'providers/omarchy/provider.py')
 om = importlib.util.module_from_spec(SPEC)
 sys.modules['omarchy_provider'] = om
@@ -162,7 +164,8 @@ class GuardTests(unittest.TestCase):
         self.assertEqual(out, {})
 
     def test_guard_timeout_returns_partial(self):
-        out = om.run_guards([(0, 'w', 'true'), (1, 'w', 'sleep 5')], timeout=1.0)
+        # The slow guard always outlives the (scaled) budget; it is killed.
+        out = om.run_guards([(0, 'w', 'true'), (1, 'w', 'sleep 60')], timeout=budget(1.5))
         self.assertEqual(out.get((0, 'w')), True)
         self.assertNotIn((1, 'w'), out)
 

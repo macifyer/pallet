@@ -14,6 +14,8 @@ import unittest
 from unittest.mock import patch
 
 ROOT = Path(__file__).resolve().parents[1]
+sys.path.insert(0, str(ROOT / 'tests'))
+from timing import budget  # noqa: E402
 SPEC = importlib.util.spec_from_file_location('streaming_host', ROOT / 'src/host.py')
 host_module = importlib.util.module_from_spec(SPEC)
 SPEC.loader.exec_module(host_module)
@@ -164,24 +166,39 @@ class EndToEndStreamingTest(unittest.TestCase):
                 (d / 'manifest.json').write_text(json.dumps({'name': name, 'exec': [sys.executable, str(d / 'w.py')]}))
             proc = subprocess.Popen([sys.executable, str(root / 'src/host.py')], stdin=subprocess.PIPE,
                                     stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, text=True)
-            try:
-                time.sleep(0.3)
+
+            def run(qid):
+                """Send one search; return [(seconds, msg)] up to the first message with both rows."""
                 start = time.monotonic()
-                proc.stdin.write(json.dumps({'id': 'q1', 'op': 'search', 'query': 'x'}) + '\n'); proc.stdin.flush()
+                proc.stdin.write(json.dumps({'id': qid, 'op': 'search', 'query': 'x'}) + '\n'); proc.stdin.flush()
                 stamps = []
                 while True:
-                    ready, _, _ = select.select([proc.stdout], [], [], 3)
+                    ready, _, _ = select.select([proc.stdout], [], [], budget(3))
                     self.assertTrue(ready, 'host did not answer')
                     msg = json.loads(proc.stdout.readline())
+                    if msg.get('id') != qid:
+                        continue
                     stamps.append((time.monotonic() - start, msg))
-                    if msg.get('final'):
-                        break
+                    if 'slow' in [r['title'] for r in msg['results']]:
+                        return stamps
+            try:
+                # Warm-up: wait until both providers are up and have answered
+                # once, so start-up cost is not measured as streaming latency.
+                run('q0')
+                stamps = run('q1')
             finally:
-                proc.stdin.close(); proc.wait(timeout=5); proc.stdout.close()
+                proc.stdin.close(); proc.wait(timeout=budget(5)); proc.stdout.close()
         first_t, first = stamps[0]
-        self.assertLess(first_t, 0.3)
+        slow_t, last = stamps[-1]
+        # The first emit carries only the fast row, is not final, and arrives
+        # before the slow provider's reply: it did not wait for it.
         self.assertEqual([r['title'] for r in first['results']], ['fast'])
-        self.assertEqual([r['title'] for r in stamps[-1][1]['results']], ['fast', 'slow'])
+        self.assertIs(first['final'], False)
+        self.assertEqual(first['pending'], ['slow'])
+        self.assertLess(first_t, slow_t)
+        self.assertLess(first_t, budget(0.3))
+        self.assertEqual([r['title'] for r in last['results']], ['fast', 'slow'])
+        self.assertIs(last['final'], True)
 
 
 if __name__ == '__main__':

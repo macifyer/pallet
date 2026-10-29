@@ -3,6 +3,7 @@ import importlib.util
 import json
 import os
 from pathlib import Path
+import select
 import subprocess
 import sys
 import threading
@@ -10,6 +11,8 @@ import time
 import unittest
 
 ROOT = Path(__file__).resolve().parents[1]
+sys.path.insert(0, str(ROOT / 'tests'))
+from timing import budget  # noqa: E402
 SPEC = importlib.util.spec_from_file_location('menus_provider', ROOT / 'providers/menus/provider.py')
 menus = importlib.util.module_from_spec(SPEC)
 sys.modules['menus_provider'] = menus
@@ -140,11 +143,23 @@ class MenusWithoutGiTest(unittest.TestCase):
         env = dict(os.environ, PATH='/usr/bin:/bin', DBUS_SESSION_BUS_ADDRESS='unix:path=/nonexistent')
         code = ("import sys; sys.modules['gi'] = None\n"
                 "import runpy; runpy.run_path(%r, run_name='__main__')" % str(ROOT / 'providers/menus/provider.py'))
-        proc = subprocess.run([sys.executable, '-c', code], input=json.dumps({'id': 'q1', 'op': 'search', 'query': 'save'}) + '\n',
-                              text=True, capture_output=True, timeout=10, env=env)
-        self.assertEqual(proc.returncode, 0, proc.stderr)
-        self.assertEqual(json.loads(proc.stdout.splitlines()[0]), {'id': 'q1', 'results': []})
-
+        # Keep stdin open until the reply: on a desktop where hyprctl reports
+        # a focused window, the answer comes from the walk worker thread, and
+        # closing stdin first would end the provider before it can reply (the
+        # host never closes a provider's stdin mid-query).
+        proc = subprocess.Popen([sys.executable, '-c', code], stdin=subprocess.PIPE, stdout=subprocess.PIPE,
+                                stderr=subprocess.PIPE, text=True, env=env)
+        try:
+            proc.stdin.write(json.dumps({'id': 'q1', 'op': 'search', 'query': 'save'}) + '\n'); proc.stdin.flush()
+            ready, _, _ = select.select([proc.stdout], [], [], budget(10))
+            self.assertTrue(ready, 'menus provider did not answer')
+            first = proc.stdout.readline()
+        finally:
+            proc.stdin.close()
+            proc.wait(timeout=budget(10))
+            stderr = proc.stderr.read(); proc.stdout.close(); proc.stderr.close()
+        self.assertEqual(proc.returncode, 0, stderr)
+        self.assertEqual(json.loads(first), {'id': 'q1', 'results': []})
 
 if __name__ == '__main__':
     unittest.main()

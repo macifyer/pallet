@@ -40,6 +40,10 @@ python3 scripts/check_release.py
 python3 -m unittest discover -s tests -v
 ```
 
+Timing tests scale their time limits on slow machines (calibrated from
+Python start-up time); force a factor with `PALLET_TEST_TIME_SCALE=5` on a
+TCG VM or loaded CI runner.
+
 Host smoke test (does not execute result actions):
 
 ```sh
