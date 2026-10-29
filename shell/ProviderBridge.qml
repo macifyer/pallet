@@ -86,8 +86,15 @@ Process {
             Quickshell.execDetached(argv);
         }
     }
+    // Remember what was chosen so the host can boost it next time (frecency).
+    function record(result: var): void {
+        if (!root.running || !result || typeof result.provider !== "string") return;
+        root.write(JSON.stringify({ id: "", op: "record", provider: result.provider,
+            result: String(result.id ?? ""), title: String(result.title ?? "") }) + "\n");
+    }
     function execute(action: var, result: var): void {
         if (action === undefined || action === null) return;
+        root.record(result);
         switch (action.type) {
         case "launch": root.launch(action.argv); break;
         case "open": root.launch(["xdg-open", String(action.url ?? action.path ?? "")]); break;

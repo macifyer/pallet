@@ -38,6 +38,11 @@ COALESCE_S = 0.03
 # the client is connected) so slow providers still show up instead of vanishing.
 LATE_GRACE_S = 2.5
 RESTART_BACKOFF_S = 30.0
+# Frecency: chosen results get a small `recent` boost (0..1) the frontend
+# folds into ranking *within* a match tier. Typed commands are never stored.
+HISTORY_MAX = 400
+HISTORY_HALF_LIFE_S = 14 * 86400
+HISTORY_SKIP = {"run"}
 SCOPES = {
     "f": "files", "file": "files", "files": "files",
     "o": "obsidian", "ob": "obsidian", "obsidian": "obsidian",
@@ -79,6 +84,65 @@ def split_scope(query: str) -> tuple[str, str]:
 
 def _int(value, default=0):
     return value if isinstance(value, int) and not isinstance(value, bool) and value >= 0 else default
+
+def history_path():
+    base = os.environ.get("XDG_STATE_HOME") or os.path.expanduser("~/.local/state")
+    return Path(base) / "pallet" / "history.json"
+
+class History:
+    """Per-result use counts with exponential decay, persisted as JSON.
+
+    Disabled with PALLET_HISTORY=0. Keys match the frontend's Fuzzy.keyOf:
+    provider + NUL + (id or title)."""
+    def __init__(self, path=None, enabled=None):
+        self.enabled = os.environ.get("PALLET_HISTORY", "1") != "0" if enabled is None else enabled
+        self.path = path or history_path()
+        self.entries: dict[str, list] = {}
+        if self.enabled: self._load()
+    def _load(self):
+        try: data = json.loads(self.path.read_text(encoding="utf-8"))
+        except (OSError, ValueError): return
+        if isinstance(data, dict):
+            for key, value in data.items():
+                if isinstance(key, str) and isinstance(value, list) and len(value) == 2 \
+                        and all(isinstance(v, (int, float)) and not isinstance(v, bool) for v in value):
+                    self.entries[key] = [float(value[0]), float(value[1])]
+    @staticmethod
+    def key(provider, rid, title=""):
+        return f"{provider}\0{rid or title}"
+    def record(self, provider, rid, title="", now=None):
+        if not self.enabled or not isinstance(provider, str) or not provider or provider in HISTORY_SKIP: return
+        if not (rid or title): return
+        now = time.time() if now is None else now
+        key = self.key(provider, rid, title)
+        weight, at = self.entries.get(key, (0.0, now))
+        self.entries[key] = [self._decayed(weight, at, now) + 1.0, now]
+        if len(self.entries) > HISTORY_MAX:
+            for stale in sorted(self.entries, key=lambda k: self.entries[k][1])[:len(self.entries) - HISTORY_MAX]:
+                del self.entries[stale]
+        self._save()
+    @staticmethod
+    def _decayed(weight, at, now):
+        return weight * 0.5 ** (max(0.0, now - at) / HISTORY_HALF_LIFE_S)
+    def score(self, provider, rid, title="", now=None):
+        entry = self.entries.get(self.key(provider, rid, title))
+        if not entry: return 0.0
+        weight = self._decayed(entry[0], entry[1], time.time() if now is None else now)
+        return round(min(1.0, weight / 5.0), 3)
+    def annotate(self, rows):
+        if not self.enabled or not self.entries: return
+        now = time.time()
+        for row in rows:
+            value = self.score(row.get("provider", ""), row.get("id", ""), row.get("title", ""), now)
+            if value > 0 and "recent" not in row: row["recent"] = value
+    def _save(self):
+        try:
+            self.path.parent.mkdir(parents=True, exist_ok=True)
+            tmp = self.path.with_suffix(".tmp")
+            tmp.write_text(json.dumps(self.entries, separators=(",", ":")), encoding="utf-8")
+            os.replace(tmp, self.path)
+        except OSError as err:
+            log(f"history: could not save: {err}")
 
 class Provider:
     def __init__(self, name, argv, inbox, spec=None, on_reply=None):
@@ -149,8 +213,9 @@ def spawn_detached(argv):
     return None
 
 class Host:
-    def __init__(self):
+    def __init__(self, history=None):
         self.inbox = asyncio.Queue(); self.providers = []; self.merge_task = None; self.latest_qid = None
+        self.history = history if history is not None else History(enabled=False)
         # True while the client's stdin is open; enables late straggler emits.
         self.listening = False
     def on_provider_reply(self, name, msg):
@@ -195,6 +260,8 @@ class Host:
                     self.emit({"id": aid, "executed": False, "provider": wanted, "error": f"{wanted} provider is not running"}); return
                 await provider.send({"id": aid, "op": "execute", "action": msg.get("action")}); return
         self.emit({"id": aid, "executed": False, "provider": wanted, "error": f"unknown provider: {wanted or '?'}"})
+    async def on_record(self, msg):
+        self.history.record(msg.get("provider"), str(msg.get("result", "")), str(msg.get("title", "")))
     async def on_launch(self, msg):
         """Launch argv (no shell) on the frontend's behalf so failures are reported."""
         err = await asyncio.get_running_loop().run_in_executor(None, spawn_detached, msg.get("argv"))
@@ -245,6 +312,7 @@ class Host:
             rows = []
             for result in msg["results"]:
                 if isinstance(result, dict): result.setdefault("provider", name); rows.append(result)
+            self.history.annotate(rows)
             by_provider[name] = rows
             if msg.get("partial") is not True: pending.discard(name)
             if emitted_final:
@@ -272,11 +340,12 @@ async def read_client(host):
             elif op == "execute": await host.on_execute(msg)
             elif op == "launch": await host.on_launch(msg)
             elif op == "warm": await host.on_warm(msg)
+            elif op == "record": await host.on_record(msg)
     finally:
         host.listening = False
 
 async def amain():
-    host = Host()
+    host = Host(History())
     for manifest in discover_manifests():
         try: spec = json.loads(manifest.read_text(encoding="utf-8"))
         except json.JSONDecodeError: continue
