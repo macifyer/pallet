@@ -25,4 +25,4 @@ Conservative and listing-only:
   command with no arguments in a visible `foot` terminal, and require the
   confirmation sheet. History never records `run` rows.
 
-`foot` is in Omarchy's default packages (`applications/foot.desktop`).
+`foot` is in Omarchy's default packages (`install/omarchy-base.packages`).
