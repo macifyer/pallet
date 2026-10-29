@@ -1,0 +1,27 @@
+{
+  // Trimmed copy of the shape of Omarchy's default/omarchy/omarchy-menu.jsonc.
+  "system": {"icon":"x","label":"System","aliases":["power-menu"]},
+  "system.lock": {"label":"Lock","action":"omarchy-system-lock"},
+  "system.shutdown": {"label":"Shutdown","action":"omarchy-system shutdown"},
+  "system.hibernate": {"label":"Hibernate","when":"omarchy-hibernation-available","action":"systemctl hibernate"},
+  "trigger": {"label":"Trigger"},
+  "trigger.toggle": {"label":"Toggle"},
+  "trigger.toggle.nightlight-on": {"label":"Nightlight On","when":"! omarchy-toggle-nightlight --status","action":"omarchy-toggle-nightlight"}, // inline comment
+  "trigger.toggle.nightlight-off": {"label":"Nightlight Off","when":"omarchy-toggle-nightlight --status","action":"omarchy-toggle-nightlight"},
+  "install": {"label":"Install"},
+  "install.package": {"label":"Package","action":"xdg-terminal-exec --app-id=org.omarchy.terminal omarchy-pkg-install"},
+  "install.editor": {"label":"Editor"},
+  "install.editor.zed": {"label":"Zed","disabled":"omarchy-pkg-present zed","action":"omarchy-install-zed"},
+  "remove": {"label":"Remove"},
+  "remove.theme": {"label":"Theme","action":"omarchy-theme-remove"},
+  "setup": {"label":"Setup"},
+  "setup.default": {"label":"Defaults"},
+  "setup.default.browser": {"label":"Browser"},
+  "setup.default.browser.firefox": {"label":"Firefox","action":"omarchy-default-browser firefox"},
+  "learn": {"label":"Learn"},
+  "learn.omarchy": {"label":"Omarchy","action":"omarchy-launch-webapp 'https://omarchy.org/manual/'"},
+  "orphan.child": {"label":"Orphan","action":"true"},
+  "apps": {"label":"Apps","action":"omarchy-shell omarchy.dock apps"},
+  "apps.inner": {"label":"Under an action","action":"true"},
+  "url": {"label":"has // inside a string","action":"omarchy-launch-webapp 'https://a.example/x'"},
+}

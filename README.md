@@ -40,6 +40,10 @@ python3 scripts/check_release.py
 python3 -m unittest discover -s tests -v
 ```
 
+Timing tests scale their time limits on slow machines (calibrated from
+Python start-up time); force a factor with `PALLET_TEST_TIME_SCALE=5` on a
+TCG VM or loaded CI runner.
+
 Host smoke test (does not execute result actions):
 
 ```sh
@@ -60,6 +64,15 @@ Use prefixes when you want one provider focused instead of mixed search:
 - `files:invoice` or `f:invoice` — files only
 - `obsidian:todo` or `o:todo` — Obsidian actions only
 - `apps:zen` or `a:zen` — applications only
+- `omarchy:theme`, `om:theme` or `menu:theme` — the native Omarchy menu (every entry) and shell panels
+- `system:mute` or `s:mute` — volume, media, brightness, notifications, window helpers
+- `web:lofi` (also `default:`) — Omarchy's default apps and web apps; text searches every web app
+- `windows:`/`w:`, `menus:`/`m:`, `plugins:`/`p:` — open windows, the focused app's menus, plugins
+- `run:pyth` — PATH commands starting with the text, plus `Run: pyth`
+
+Mixed search remains the default; scopes are additive, not required. A few
+leading words also pick a web app without a scope: `youtube lofi`,
+`maps coffee`, `chatgpt …`, `grok …`, `google …`.
 
 Mixed search remains the default; scopes are additive, not required.
 

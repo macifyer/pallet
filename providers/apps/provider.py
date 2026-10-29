@@ -12,6 +12,7 @@ from pathlib import Path
 import shlex
 import shutil
 import sys
+import threading
 import time
 
 MAX_RESULTS = 15
@@ -155,12 +156,29 @@ def load_apps() -> list[dict]:
     return sorted(apps, key=lambda a: (a['name'].lower(), a['desktop_id']))
 
 
+_refreshing = threading.Lock()
+
+
+def _refresh() -> None:
+    global _apps, _checked_at
+    try:
+        apps = load_apps()
+        _apps, _checked_at = apps, time.monotonic()  # atomic swap
+    finally:
+        _refreshing.release()
+
+
 def ensure_fresh(force: bool = False) -> None:
+    """Load synchronously the first time (or when forced); afterwards a stale
+    list keeps serving while a background thread rescans the .desktop dirs,
+    so a keystroke never pays for the rescan."""
     global _apps, _checked_at
     now = time.monotonic()
-    if force or now - _checked_at >= CHECK_TTL_S:
-        _apps = load_apps()
-        _checked_at = now
+    if force or _checked_at == float('-inf'):
+        _apps, _checked_at = load_apps(), time.monotonic()
+        return
+    if now - _checked_at >= CHECK_TTL_S and _refreshing.acquire(blocking=False):
+        threading.Thread(target=_refresh, name='apps-refresh', daemon=True).start()
 
 
 def score(query: str, app: dict) -> float:
@@ -226,6 +244,8 @@ def main() -> None:
             continue
         if msg.get('op') == 'search':
             print(json.dumps({'id': msg.get('id', ''), 'results': search(str(msg.get('query', '')))}), flush=True)
+        elif msg.get('op') == 'warm':
+            ensure_fresh()
         elif msg.get('op') == 'cancel':
             print(json.dumps({'id': msg.get('target', ''), 'cancelled': True}), flush=True)
         elif msg.get('op') == 'execute':

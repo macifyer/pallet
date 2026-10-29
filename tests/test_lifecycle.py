@@ -81,5 +81,11 @@ class JavaScriptTests(unittest.TestCase):
                                 cwd=ROOT, text=True, capture_output=True, timeout=10)
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
 
+    @unittest.skipUnless(shutil.which('node'), 'Node.js required for JavaScript ranking checks')
+    def test_ranking_tiers_and_fallbacks(self):
+        result = subprocess.run([shutil.which('node'), str(ROOT / 'tests/ranking.cjs')],
+                                cwd=ROOT, text=True, capture_output=True, timeout=10)
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+
 if __name__ == '__main__':
     unittest.main()
