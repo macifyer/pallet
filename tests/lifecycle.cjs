@@ -90,7 +90,7 @@ assert.equal(root.selectedIndex, 0);
 // The user moves to "fire drill"; a better straggler arrives and ranks first.
 root.selectedIndex = 1; root.userMoved = true;
 const selected = root.filtered[1].id;
-receive([row('apps', 'b', 'firewall'), row('apps', 'c', 'fire drill'), row('files', 'a', 'fire')], '', 'fire', [],
+receive([row('apps', 'b', 'firewall'), row('apps', 'c', 'fire drill'), row('menus', 'a', 'fire')], '', 'fire', [],
     {final: true, pending: [], failed: [], incremental: true});
 assert.equal(root.filtered[0].id, 'a', 'exact match ranks first');
 assert.equal(root.filtered[root.selectedIndex].id, selected, 'selection follows the same result');

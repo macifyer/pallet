@@ -89,6 +89,13 @@ not yet exercised in the real Quickshell overlay on Hyprland.
   message is authoritative. The re-rank now uses the query text that was
   sent for an answer, not the input text at the moment the reply landed.
   Replies for old query ids are still dropped.
+- Ranking: without file intent (`/`, `~`, `.`), file and folder rows sit in
+  their own band below every command row that matches at substring tier or
+  better (still above weak subsequence matches; their own tier order is kept
+  inside the band). "config" now lists Omarchy's Config, Update Config and
+  Update Config: … rows before ~/.config/ghostty/config, and "theme" lists
+  the Theme menu row before ~/.local/state/omarchy/current/theme. An
+  exact-named file no longer gets a bonus over an exact-named command.
 
 ## [0.9.1]
 

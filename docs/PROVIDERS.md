@@ -59,6 +59,10 @@ replies `executed`/`error`), and `{"op":"record","provider":"apps","result":"app
   (`$XDG_STATE_HOME/pallet/history.json`; `PALLET_HISTORY=0` disables it;
   `run` rows are never recorded). It only reorders rows within the same match
   tier (exact > prefix > word > substring > subsequence).
+- Rows from the `files` provider rank below every other row that matches at
+  substring tier or better unless the query has file intent (`/`, `~` or
+  `.`), so an exact-named Omarchy, system or app row beats an equally named
+  file or folder.
 
 ## Action types
 

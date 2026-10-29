@@ -9,7 +9,10 @@ var TIER_PREFIX = 4;
 var TIER_WORD = 3;
 var TIER_SUBSTRING = 2;
 var TIER_SUBSEQUENCE = 1;
-var FALLBACK_RANK = -10;  // "Run: <query>" and other fallbacks: always last.
+var FALLBACK_RANK = -10;
+// Width of one tier inside the command-intent file band: [2.0, 2.4) covers
+// file substring..exact, below any command substring row (>= 2.45).
+var FILE_BAND_STEP = 0.1;  // "Run: <query>" and other fallbacks: always last.
 
 // Subsequence match. Returns -1 when query is not a subsequence of text,
 // otherwise 0..1 (tighter, earlier matches score higher).
@@ -122,7 +125,9 @@ function isFallback(r) {
 // Client-side pass over merged provider results: drop non-matches, order by
 // match tier (exact > prefix > word boundary > substring > subsequence), then
 // within a tier blend match quality, the provider's advisory score, intent
-// (files vs commands), and a bounded recency boost. Fallback rows such as
+// (files vs commands), and a bounded recency boost. Without file intent
+// (no "/", "~" or "."), file rows rank below command rows that match at
+// substring or better, whatever their own tier. Fallback rows such as
 // "Run: <query>" always sort last. The sort is stable: ties keep the host's
 // provider order.
 function rank(query, results) {
@@ -160,6 +165,14 @@ function rank(query, results) {
         out.fuzzy = m.quality;
         out.tier = m.tier;
         out.rank = m.tier + within;
+        if (isFile && !wantsFile && m.tier >= TIER_SUBSTRING) {
+            // Command intent: file and folder rows form their own band below
+            // every command row matching at substring or better (so Omarchy
+            // "Config" or "Update Config: …" beat ~/.config/ghostty/config),
+            // still above command subsequence matches. Inside the band the
+            // usual tier order holds.
+            out.rank = TIER_SUBSTRING + FILE_BAND_STEP * (m.tier - TIER_SUBSTRING) + FILE_BAND_STEP * 0.9 * within;
+        }
         scored.push(out);
     }
     scored.sort(function (a, b) { return (b.rank - a.rank) || (a.order - b.order); });

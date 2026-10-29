@@ -65,6 +65,46 @@ assert.deepEqual(ids(out), ['b', 'a']);
 out = ctx.rank('files', [r('a', 'Files'), r('b', 'Files manager', {recent: 1})]);
 assert.deepEqual(ids(out), ['a', 'b']);
 
+// Command intent beats generic file/folder rows, whatever their own tier:
+// "config" puts the Omarchy menu rows above ~/.config/ghostty/config.
+const om = (id, title, subtitle, keywords, score) =>
+    r(id, title, {provider: 'omarchy', subtitle, keywords, score});
+const file = (id, title, parent, score = 0.97) =>
+    r(id, title, {provider: 'files', subtitle: parent, keywords: parent.replace(/^~\//, '').replace(/\//g, ' ').toLowerCase(), score});
+out = ctx.rank('config', [
+    r('app', 'Console', {provider: 'apps'}),
+    file('ghostty', 'config', '~/.config/ghostty'),
+    file('dotconfig', '.config', '~'),
+    file('hyprconf', 'hyprland.conf', '~/.config/hypr'),
+    om('upd-hypr', 'Update Config: Hyprland', 'Omarchy › Update › Config', 'update config hyprland', 0.82),
+    om('upd-tmux', 'Update Config: Tmux', 'Omarchy › Update › Config', 'update config tmux', 0.82),
+    om('setup', 'Config', 'Open menu: Omarchy › Setup › Config', 'setup config', 0.807),
+    om('upd', 'Update Config', 'Open menu: Omarchy › Update › Config', 'update config', 0.697),
+]);
+assert.deepEqual(ids(out).slice(0, 4), ['setup', 'upd-hypr', 'upd-tmux', 'upd']);
+assert.deepEqual(ids(out).slice(4, 6), ['ghostty', 'dotconfig'], 'files keep their own order below');
+assert(ids(out).indexOf('ghostty') > ids(out).indexOf('upd'));
+// "theme": the Theme menu row beats the omarchy/current/theme folder.
+out = ctx.rank('theme', [
+    file('curtheme', 'theme', '~/.local/state/omarchy/current'),
+    om('theme', 'Theme', 'Omarchy › Appearance', 'appearance theme themes', 0.95),
+    om('remove', 'Remove Theme', 'Omarchy › Remove', 'remove theme', 0.82),
+]);
+assert.deepEqual(ids(out), ['theme', 'remove', 'curtheme']);
+// Equal exact match: Omarchy, system and app rows beat a file even when the
+// file's advisory score is higher; host order does not matter.
+for (const provider of ['omarchy', 'system', 'apps']) {
+    out = ctx.rank('notes', [file('f', 'notes', '~/Documents', 1), r('c', 'Notes', {provider, score: 0})]);
+    assert.deepEqual(ids(out), ['c', 'f'], provider);
+}
+// File rows still beat weak (subsequence) command matches, and fallbacks
+// still sort last.
+out = ctx.rank('config', [r('run', 'Run: config', {provider: 'run'}), r('weak', 'Color Night Filter Guide'), file('ghostty', 'config', '~/.config/ghostty')]);
+assert.deepEqual(ids(out), ['ghostty', 'weak', 'run']);
+// File intent keeps files on top.
+out = ctx.rank('.config', [om('setup', 'Config', 'Open menu: Omarchy › Setup › Config', 'setup config', 0.8), file('dotconfig', '.config', '~')]);
+assert.equal(out[0].id, 'dotconfig');
+
 // Selection helpers.
 const list = ctx.rank('a', [r('1', 'a', {provider: 'x'}), r('2', 'ab', {provider: 'y'})]);
 assert.equal(ctx.indexOfKey(list, ctx.keyOf({provider: 'y', id: '2'})), 1);
