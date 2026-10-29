@@ -1,5 +1,6 @@
 import QtQuick
 import QtQuick.Layouts
+import "Fuzzy.js" as Fuzzy
 
 // Action panel: a small floating list of actions for the selected result,
 // positioned to the right of the palette box. Actions carrying
@@ -9,6 +10,9 @@ Rectangle {
     id: root
 
     required property var result
+    // Current search text; a confirmation is bound to the exact result and
+    // query it was opened for.
+    property string query: ""
     signal actionExecuted(var action, var result)
 
     width: 240
@@ -22,6 +26,9 @@ Rectangle {
 
     // Non-null while a danger-gated action awaits its second Enter.
     property var pendingConfirm: null
+    property string confirmKey: ""
+    property string confirmQuery: ""
+    property string resultKey: Fuzzy.keyOf(result)
     readonly property bool confirming: pendingConfirm !== null
 
     ColumnLayout {
@@ -33,6 +40,7 @@ Rectangle {
         spacing: 2
 
         Text {
+            textFormat: Text.PlainText
             Layout.fillWidth: true
             text: qsTr("Actions")
             color: "#6c7086"
@@ -61,6 +69,8 @@ Rectangle {
                 color: root.actionIndex === index ? "#45475a" : "transparent"
 
                 Text {
+                    textFormat: Text.PlainText
+            textFormat: Text.PlainText
                     anchors.left: parent.left
                     anchors.leftMargin: 10
                     anchors.verticalCenter: parent.verticalCenter
@@ -81,6 +91,7 @@ Rectangle {
         spacing: 6
 
         Text {
+            textFormat: Text.PlainText
             Layout.fillWidth: true
             text: root.confirmTitle()
             color: root.confirmColor()
@@ -90,6 +101,7 @@ Rectangle {
         }
 
         Text {
+            textFormat: Text.PlainText
             Layout.fillWidth: true
             text: root.confirmDetail()
             color: "#a6adc8"
@@ -100,6 +112,7 @@ Rectangle {
         Item { Layout.fillHeight: true }
 
         Text {
+            textFormat: Text.PlainText
             Layout.fillWidth: true
             text: qsTr("Enter confirms \u00b7 Esc cancels")
             color: "#6c7086"
@@ -170,32 +183,42 @@ Rectangle {
     function executeCurrent(): void {
         if (root.confirming) {
             const action = root.pendingConfirm;
-            root.pendingConfirm = null;
-            actionExecuted(action, root.result);
+            const valid = root.confirmKey === Fuzzy.keyOf(root.result) && root.confirmQuery === root.query;
+            root.cancelConfirm();
+            // The selection or query changed under the sheet: never run it.
+            if (valid)
+                actionExecuted(action, root.result);
             return;
         }
         const actions = root.result && root.result.actions ? root.result.actions : [];
         if (actions.length === 0 || actionIndex >= actions.length) return;
         const action = actions[actionIndex];
         if (action.danger === "confirm") {
-            pendingConfirm = action;
+            root.openConfirm(action);
             return;
         }
         actionExecuted(action, root.result);
     }
 
     function openConfirm(action: var): void {
+        confirmKey = Fuzzy.keyOf(root.result);
+        confirmQuery = root.query;
         pendingConfirm = action;
     }
 
     function cancelConfirm(): void {
         pendingConfirm = null;
+        confirmKey = "";
+        confirmQuery = "";
     }
 
     function reset(): void {
-        pendingConfirm = null;
+        cancelConfirm();
         actionIndex = 0;
     }
 
-    onResultChanged: reset()
+    // Reset when the selected result changes identity (provider + id), not
+    // merely when a streamed update re-creates the same row object.
+    onResultKeyChanged: reset()
+    onQueryChanged: cancelConfirm()
 }

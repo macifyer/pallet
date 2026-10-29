@@ -61,6 +61,7 @@ Rectangle {
     }
 
     Text {
+        textFormat: Text.PlainText
         id: fallbackIcon
 
         anchors.left: parent.left
@@ -78,6 +79,7 @@ Rectangle {
     }
 
     Text {
+        textFormat: Text.PlainText
         id: title
 
         anchors.left: appIcon.right
@@ -93,6 +95,7 @@ Rectangle {
     }
 
     Text {
+        textFormat: Text.PlainText
         anchors.left: title.right
         anchors.leftMargin: 12
         anchors.right: parent.right
