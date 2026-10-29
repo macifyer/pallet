@@ -5,6 +5,80 @@ Release numbers come from the root manifest.json. This changelog starts with
 
 ## [Unreleased]
 
+## [0.10.0]
+
+Native-session verification on Omarchy is still pending for everything
+below: it is covered by Python/Node tests and a synthetic host benchmark only,
+not yet exercised in the real Quickshell overlay on Hyprland.
+
+### Speed
+- The host streams merged results as soon as the first provider answers
+  (`partial`, `final`, `pending`, `failed`), then follow-ups under the same
+  query id. Late providers still update the final view.
+- Manifest routing hints `minQuery`/`scopedOnly`, plus more scope prefixes
+  (`om:`/`menu:`, `s:`, `w:`, `m:`, `p:`, `run:`, `web:`).
+- `op:warm` when the overlay opens: files, menus, apps, omarchy and run
+  pre-load caches. Frontend debounce went from 80 ms to 30 ms.
+- Files: background chunked index (no per-entry stat), partial cold replies,
+  substring candidates with top-k selection; stat only for shown rows.
+- Menus (AT-SPI): cache-first with stale-while-revalidate, walks on a
+  worker thread with a 1.2 s budget; stdin never blocks. Without gi or the
+  accessibility bus it answers [] instead of crashing.
+- Apps: .desktop rescans happen in the background.
+- Benchmark (`scripts/bench_host.py`, 60k-file synthetic home): warm
+  median 105 ms → 7 ms, cold "notes" 571 ms with no file rows → first rows
+  77 ms and files at 351 ms, typing "con…config" ~100 ms → 11–23 ms. With a
+  1.5 s straggler provider: first rows 502 ms → 14 ms. The final/unresolved
+  marker now arrives at 600 ms (merge deadline raised from 500 ms).
+
+### Search quality
+- Ranking tiers: exact > prefix > word boundary > substring > subsequence,
+  stable ties. `fallback` rows (`Run:` and PATH commands) always rank last.
+- Selection follows the same result while rows stream in; updates wait
+  while an action panel or confirmation is open.
+- Frecency: chosen results get a bounded `recent` boost within their tier
+  (`$XDG_STATE_HOME/pallet/history.json`, 14-day half-life, 400 entries,
+  `PALLET_HISTORY=0` disables; `Run:` commands are never recorded).
+
+### Foundations
+- Confirmation sheets are bound to the exact result id and query.
+- Provider failures/timeouts are shown in the footer; action failures
+  (provider `executed:false`, host-launched argv that fails to spawn) flash
+  in the footer and raise an `omarchy-notification-send` notification.
+- `launch` actions are spawned by the host (argv, no shell) so a missing
+  command is reported.
+- Conservative PATH discovery in the run provider: directory listing only,
+  never executes candidates; exact name, or prefix with `run:`; confirm-gated.
+
+### Omarchy parity and actions
+- omarchy provider: every entry of Omarchy's own menu
+  (`default/omarchy/omarchy-menu.jsonc` plus the user overlay), run through
+  `omarchy-menu summon <id>`. `when`/`disabled` guards are evaluated in the
+  background like the native menu. Hidden rows stay hidden, installed rows
+  are marked, and unknown guards open the parent menu. Destructive and
+  system-state entries (power, remove, reset, security, DNS, updates,
+  installs) require confirmation. Shell panels (Network, Bluetooth, Audio,
+  Power, Display, Calendar, World Clock, Tailscale, Weather) are included.
+- system provider: key-bound controls Omarchy does not list in its menu,
+  covering volume, mic, output and media-source switching, media keys,
+  brightness, keyboard backlight, Bluetooth power, notifications, window
+  helpers (Close All Windows confirms), time/battery and the agent picker.
+  Power and update rows moved to the omarchy provider (no duplicates). The
+  hibernation probe at import time was removed.
+- New defaults provider (`web:`): Omarchy's default apps, TUIs and web apps
+  as its keys launch them (private browser, tmux/herdr terminals, cliamp,
+  btop, Signal, 1Password, Spotify, lazydocker when present, ChatGPT, Grok,
+  HEY Calendar/New Email, New X Post). Also web-app searches
+  (`youtube …`, `maps …`, `chatgpt …`, `grok …`, `google …`) with the text
+  percent-encoded into one URL argument.
+- Every provider README lists the Omarchy source file for each command.
+
+### Changed
+- The system provider no longer offers Lock/Suspend/Reboot/Shutdown/Update.
+  The omarchy provider now provides them through the native menu.
+- Files "open in editor" prefers `omarchy-launch-editor`; "terminal here"
+  uses `xdg-terminal-exec --dir=`.
+
 ## [0.9.1]
 
 ### Fixed
