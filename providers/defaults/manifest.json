@@ -1,0 +1,8 @@
+{
+  "name": "defaults",
+  "description": "Omarchy's preinstalled apps, TUIs and web apps as bound to keys, plus web searches in Omarchy's web apps",
+  "exec": ["python3", "providers/defaults/provider.py"],
+  "triggers": [],
+  "capabilities": ["search"],
+  "minQuery": 2
+}
