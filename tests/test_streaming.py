@@ -140,6 +140,45 @@ class MergeStreamingTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual([m['executed'] for m in emitted], [False, False, True])
         self.assertIn('command not found', emitted[0]['error'])
 
+    async def test_launch_runs_detached_through_a_login_shell(self):
+        # argv goes through bash -lc 'exec "$@"' (Omarchy's Util.execArgv);
+        # a menu action string through bash -lc <action> (Util.execDetached).
+        with tempfile.TemporaryDirectory() as tmp:
+            out = Path(tmp) / 'out'
+            host, emitted = self.make_host()
+            await host.on_launch({'id': 'l1', 'argv': ['sh', '-c', f'echo "argv $$ $(ps -o sid= -p $$)" > {out}.1']})
+            await host.on_launch({'id': 'l2', 'command': f'echo "cmd $0" > {out}.2 && test -n "$PATH"'})
+            deadline = time.monotonic() + budget(5)
+            while time.monotonic() < deadline and not (Path(f'{out}.1').exists() and Path(f'{out}.2').exists()):
+                await asyncio.sleep(0.05)
+            self.assertEqual([m['executed'] for m in emitted], [True, True])
+            pid, sid = Path(f'{out}.1').read_text().split()[1:3]
+            self.assertEqual(pid, sid, 'launched command leads its own session (survives the palette)')
+            self.assertEqual(Path(f'{out}.2').read_text().strip(), 'cmd bash')
+
+    async def test_command_that_is_not_found_in_the_shell_is_reported(self):
+        host, emitted = self.make_host()
+        with patch.object(host_module, 'LAUNCH_WATCH_S', budget(5)):
+            await host.on_launch({'id': 'l1', 'command': 'pallet-definitely-missing-command --x'})
+            deadline = time.monotonic() + budget(5)
+            while time.monotonic() < deadline and len(emitted) < 2:
+                await asyncio.sleep(0.05)
+        self.assertEqual(emitted[0], {'id': 'l1', 'executed': True})
+        self.assertEqual(emitted[1]['executed'], False)
+        self.assertIn('command not found: pallet-definitely-missing-command', emitted[1]['error'])
+        await host.on_launch({'id': 'l2', 'command': '   '})
+        self.assertEqual(emitted[-1]['executed'], False)
+
+    def test_launch_env_adds_omarchy_bin_and_path(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            (Path(tmp) / 'bin').mkdir()
+            with patch.dict(os.environ, {'OMARCHY_PATH': '', 'PATH': '/usr/bin'}), \
+                 patch.object(host_module, 'omarchy_bin_dirs', lambda: [str(Path(tmp) / 'bin')]):
+                env = host_module.launch_env()
+            self.assertEqual(env['OMARCHY_PATH'], tmp)
+            self.assertIn(str(Path(tmp) / 'bin'), env['PATH'].split(':'))
+            self.assertEqual(env['PATH'].split(':')[0], '/usr/bin')
+
 
 class ScopeTests(unittest.TestCase):
     def test_new_scopes(self):
