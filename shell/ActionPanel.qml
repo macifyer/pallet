@@ -126,6 +126,7 @@ Rectangle {
             return String(action.title);
         switch (action.type) {
         case "launch": return qsTr("Launch");
+        case "shell":  return qsTr("Run");
         case "copy":   return qsTr("Copy");
         case "open":   return qsTr("Open");
         case "custom":

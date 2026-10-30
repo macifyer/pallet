@@ -146,7 +146,9 @@ PanelWindow {
             // Actions dismiss the overlay first, so also raise a desktop
             // notification (bin/omarchy-notification-send). The description
             // is prefixed so it can never be parsed as an option.
-            Quickshell.execDetached(["omarchy-notification-send", "--app-name", "Pallet", "-u", "normal",
+            // Through a login shell so the notifier resolves even when this
+            // process's PATH lacks Omarchy's bin directory.
+            Quickshell.execDetached(["bash", "-lc", "exec \"$@\"", "bash", "omarchy-notification-send", "--app-name", "Pallet", "-u", "normal",
                 qsTr("Pallet action failed"), qsTr("Error: ") + text]);
             if (!root.visible) return;
             root.flashMessage = qsTr("That action could not be completed — ") + text;

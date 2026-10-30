@@ -38,8 +38,10 @@ snapshot: providers that did not answer by the deadline) plus `scope` and
 `bare`. Rows arriving shortly after the deadline are still merged in.
 
 Client to host (besides `search`/`cancel`/`execute`/`warm`):
-`{"id":"l1","op":"launch","argv":[...]}` (the host spawns argv detached and
-replies `executed`/`error`), and `{"op":"record","provider":"apps","result":"apps:x","title":"X"}`
+`{"id":"l1","op":"launch","argv":[...]}` or `{"id":"l1","op":"launch","command":"..."}`
+(the host spawns it detached through a login shell and replies
+`executed`/`error`; a later `executed:false` follows if the shell reports
+126/127 within a few seconds), and `{"op":"record","provider":"apps","result":"apps:x","title":"X"}`
 (frecency history; see below).
 
 ## Result metadata
@@ -66,7 +68,10 @@ replies `executed`/`error`), and `{"op":"record","provider":"apps","result":"app
 
 ## Action types
 
-- `launch` — argv array, spawned detached by the host, no shell; a spawn failure is reported back
+- `launch` — argv array, spawned detached by the host as `bash -lc 'exec "$@"' bash <argv>`
+  (Omarchy's `Util.execArgv`; no interpolation); a missing command is reported back
+- `shell` — `command` string run as `bash -lc <command>`, detached. Only for trusted
+  command strings that come from Omarchy's own menu files (never from a query)
 - `copy` — put text on the clipboard (frontend)
 - `open` — path or url via xdg-open (frontend)
 - `custom` — provider-defined payload sent back to the owning provider
@@ -75,12 +80,12 @@ replies `executed`/`error`), and `{"op":"record","provider":"apps","result":"app
 
 ```json
 {
-  "type": "launch",
+  "type": "shell",
   "title": "Update Omarchy",
-  "argv": ["omarchy-menu", "summon", "update.omarchy"],
+  "command": "omarchy-launch-floating-terminal-with-presentation omarchy-update",
   "danger": "confirm",
   "tone": "positive",
-  "confirmation": {"title": "Update Omarchy?", "detail": "Runs Omarchy's own menu action (omarchy-menu summon update.omarchy)."}
+  "confirmation": {"title": "Update Omarchy?", "detail": "Runs Omarchy's own menu command: omarchy-launch-floating-terminal-with-presentation omarchy-update"}
 }
 ```
 
@@ -91,7 +96,8 @@ replies `executed`/`error`), and `{"op":"record","provider":"apps","result":"app
 
 ## Rules
 
-1. argv is executed without a shell. No string interpolation into shell commands.
+1. argv is passed to `exec "$@"`, never interpolated into a shell string. `shell`
+   commands are only ever trusted Omarchy menu actions.
 2. Cancellation is cooperative: on cancel, stop work and emit a cancelled reply for the target id.
 3. Provider scores are advisory; the frontend applies its fuzzy pass.
 4. Respond within 150 ms or stream partial results; the host cancels stale queries.

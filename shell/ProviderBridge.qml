@@ -79,15 +79,27 @@ Process {
         if (root.running)
             root.write(JSON.stringify({ id: "", op: "warm" }) + "\n");
     }
-    // Run argv without a shell. The host launches it so a missing command is
-    // reported back; if the host is down, fall back to a detached exec.
+    // Run argv without a shell. The host launches it (through a login shell,
+    // like Omarchy's Util.execArgv) so a missing command is reported back; if
+    // the host is down, fall back to the same detached login-shell exec.
     function launch(argv: var): void {
         if (!Array.isArray(argv) || argv.length === 0) return;
         if (root.running) {
             root.actionCounter += 1;
             root.write(JSON.stringify({ id: "l" + root.actionCounter, op: "launch", argv: argv }) + "\n");
         } else {
-            Quickshell.execDetached(argv);
+            Quickshell.execDetached(["bash", "-lc", "exec \"$@\"", "bash"].concat(argv));
+        }
+    }
+    // Run a trusted Omarchy menu action string exactly as the native menu does
+    // (Menu.qml runAction -> Util.execDetached: bash -lc <action>).
+    function runShell(command: string): void {
+        if (!command) return;
+        if (root.running) {
+            root.actionCounter += 1;
+            root.write(JSON.stringify({ id: "l" + root.actionCounter, op: "launch", command: command }) + "\n");
+        } else {
+            Quickshell.execDetached(["bash", "-lc", command]);
         }
     }
     // Remember what was chosen so the host can boost it next time (frecency).
@@ -101,6 +113,7 @@ Process {
         root.record(result);
         switch (action.type) {
         case "launch": root.launch(action.argv); break;
+        case "shell": root.runShell(String(action.command ?? "")); break;
         case "open": root.launch(["xdg-open", String(action.url ?? action.path ?? "")]); break;
         case "copy": root.launch(["wl-copy", "--", String(action.text ?? "")]); break;
         case "custom":

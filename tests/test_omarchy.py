@@ -71,7 +71,7 @@ class ParseTests(unittest.TestCase):
         self.assertIn('system', ids)
 
     @unittest.skipUnless(REAL.is_file(), 'Omarchy source checkout not present')
-    def test_real_menu_parses_and_every_row_summons_its_own_id(self):
+    def test_real_menu_parses_and_shutdown_runs_its_own_command(self):
         items = om.parse_menu(REAL.read_text())
         self.assertGreater(len(items), 300)
         c = om.Catalog(paths=lambda: (REAL, None), guards=lambda g: {})
@@ -79,7 +79,8 @@ class ParseTests(unittest.TestCase):
         self.assertGreater(len(c.rows), 300)
         for r in om.search(c, 'shutdown'):
             if r['id'] == 'omarchy:menu:system.shutdown':
-                self.assertEqual(r['actions'][0]['argv'], ['omarchy-menu', 'summon', 'system.shutdown'])
+                self.assertEqual(r['actions'][0]['type'], 'shell')
+                self.assertEqual(r['actions'][0]['command'], c.items['system.shutdown']['action'])
                 self.assertEqual(r['actions'][0]['danger'], 'confirm')
                 break
         else:
@@ -87,10 +88,11 @@ class ParseTests(unittest.TestCase):
 
 
 class SearchTests(unittest.TestCase):
-    def test_leaf_runs_through_omarchy_menu_summon_argv(self):
+    def test_leaf_runs_the_menu_command_directly(self):
+        # Same as Menu.qml runAction: the action string through bash -lc.
         c = catalog()
         r = by_id(om.search(c, 'lock'))['omarchy:menu:system.lock']
-        self.assertEqual(r['actions'][0]['argv'], ['omarchy-menu', 'summon', 'system.lock'])
+        self.assertEqual(r['actions'][0], {'type': 'shell', 'title': 'Run', 'command': 'omarchy-system-lock'})
         self.assertNotIn('danger', r['actions'][0])
         self.assertEqual(r['subtitle'], 'Omarchy › System')
         self.assertEqual(r['actions'][1], {'type': 'copy', 'title': 'Copy command', 'text': 'omarchy-system-lock'})
@@ -141,18 +143,22 @@ class GuardTests(unittest.TestCase):
         ids = by_id(om.search(c, 'nightlight'))
         self.assertIn('omarchy:menu:trigger.toggle.nightlight-on', ids)
         self.assertNotIn('omarchy:menu:trigger.toggle.nightlight-off', ids)
-        self.assertEqual(ids['omarchy:menu:trigger.toggle.nightlight-on']['actions'][0]['argv'][-1], 'trigger.toggle.nightlight-on')
+        self.assertEqual(ids['omarchy:menu:trigger.toggle.nightlight-on']['actions'][0]['command'],
+                         c.items['trigger.toggle.nightlight-on']['action'])
         self.assertNotIn('omarchy:menu:system.hibernate', by_id(om.search(c, 'hibernate')))
         self.assertEqual(len(c._calls), 1)
         c.ensure_guards(block=True)
         self.assertEqual(len(c._calls), 1, 'fresh answers are reused')
 
-    def test_disabled_rows_stay_listed_without_a_run_action(self):
+    def test_disabled_rows_open_their_menu_instead_of_doing_nothing(self):
+        # Installed already: Enter used to copy silently. Now it opens the
+        # native submenu, where Omarchy shows the row disabled.
         c = catalog(answers=answer(**{'omarchy-pkg-present zed': {'d': True}}))
         c.ensure_guards(block=True)
         r = by_id(om.search(c, 'zed'))['omarchy:menu:install.editor.zed']
         self.assertIn('installed', r['subtitle'])
-        self.assertEqual([a['type'] for a in r['actions']], ['copy'])
+        self.assertEqual(r['actions'][0]['argv'], ['omarchy-menu', 'summon', 'install.editor'])
+        self.assertEqual([a['type'] for a in r['actions']], ['launch', 'copy'])
 
     def test_guard_script_runs_conditions_in_bash_and_parses_answers(self):
         guards = [(0, 'w', 'true'), (1, 'w', 'false'), (2, 'd', '[[ 1 == 1 ]] # trailing comment')]

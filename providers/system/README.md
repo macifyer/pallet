@@ -4,10 +4,12 @@ Everyday controls that Omarchy binds to keys but does not list in its menu:
 volume, media, brightness, keyboard backlight, Bluetooth power, notifications,
 window helpers and status notifications. Power, session, update and package
 actions moved to the `omarchy` provider, which runs them through
-`omarchy-menu summon` with confirmations.
+its own menu commands with confirmations.
 
-Every row is a fixed argv (no shell, no user input) of a command that exists in
-Omarchy's `bin/`. The provider runs nothing at import or search time.
+Every row is a fixed argv (no user input) of a command that exists in
+Omarchy's `bin/`. The host runs it like Omarchy's keybindings do, through a
+login shell (`bash -lc 'exec "$@"' bash <argv>`, `Util.execArgv`), so the
+scripts get `OMARCHY_PATH` and Omarchy's PATH. The provider runs nothing at import or search time.
 
 ## Entries
 

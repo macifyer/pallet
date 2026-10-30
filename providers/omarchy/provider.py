@@ -190,7 +190,7 @@ KEYWORDS = {
     "appearance.background": "wallpaper background",
     "learn.omarchy": "manual docs documentation help",
 }
-CONFIRM_DETAIL = "Runs Omarchy's own menu action (omarchy-menu summon {id})."
+CONFIRM_DETAIL = "Runs Omarchy's own menu command: {cmd}"
 
 
 def confirm_for(item_id: str) -> str:
@@ -406,10 +406,13 @@ class Catalog:
 
     def _build_rows(self) -> list[dict]:
         rows = []
+        parents = {e["parent"] for e in self.items.values()}
         for item_id in self.order:
             entry = self.items[item_id]
             if item_id == "root" or entry["target"]:
                 continue
+            if not entry["action"] and not entry["provider"] and item_id not in parents:
+                continue  # an empty submenu: nothing to open, nothing to run
             chain = self._chain(entry)
             if chain is None:
                 continue
@@ -463,15 +466,26 @@ def menu_result(catalog: Catalog, row: dict, s: float) -> dict | None:
     if row["is_menu"]:
         subtitle = "Open menu: " + subtitle
     actions: list[dict] = []
+    parent_route = entry["parent"] if entry["parent"] not in ("", "root") else "root"
     if disabled is True:
+        # Installed already: the native menu lists it disabled in its submenu.
         subtitle += " · ✓ installed"
+        note = note or " · opens in the Omarchy menu"
+        actions.append({"type": "launch", "title": "Open in Omarchy menu",
+                        "argv": ["omarchy-menu", "summon", parent_route]})
+    elif row["is_menu"] or note:
+        # Submenus (and rows whose guard is not answered yet) open that place
+        # in the real Omarchy menu: bin/omarchy-menu summon <route>.
+        actions.append({"type": "launch", "title": "Open in Omarchy menu",
+                        "argv": ["omarchy-menu", "summon", route]})
     else:
-        action = {"type": "launch", "title": "Open in Omarchy menu" if row["is_menu"] or note else "Run",
-                  "argv": ["omarchy-menu", "summon", route]}
-        tone = "" if note or row["is_menu"] else confirm_for(entry["id"])
+        # A leaf runs the menu's own action string, exactly as Menu.qml
+        # runAction does (Util.execDetached: bash -lc <action>), detached.
+        action = {"type": "shell", "title": "Run", "command": entry["action"]}
+        tone = confirm_for(entry["id"])
         if tone:
             action.update({"danger": "confirm", "tone": tone, "confirmation": {
-                "title": f"{row['title']}?", "detail": CONFIRM_DETAIL.format(id=entry["id"])}})
+                "title": f"{row['title']}?", "detail": CONFIRM_DETAIL.format(cmd=entry["action"])}})
         actions.append(action)
     if entry["action"]:
         actions.append({"type": "copy", "title": "Copy command", "text": entry["action"]})
@@ -482,10 +496,40 @@ def menu_result(catalog: Catalog, row: dict, s: float) -> dict | None:
             "provider": "omarchy", "actions": actions}
 
 
-def extras(menu_actions: set[str]) -> list[dict]:
+BAR_CONFIG = Path(os.environ.get("XDG_CONFIG_HOME") or Path.home() / ".config") / "omarchy" / "shell.json"
+_bar_cache: dict = {"key": None, "ids": None}
+
+
+def bar_widget_ids(path: Path = BAR_CONFIG) -> set[str] | None:
+    """Plugin ids placed in the user's bar, or None when unknown. A bar-widget
+    panel only opens through a live widget (shell.qml summon -> summonBarWidget
+    returns false otherwise, silently), so panel rows for widgets that are not
+    in the bar are hidden instead of doing nothing."""
+    try:
+        st = path.stat()
+        key = (str(path), st.st_mtime_ns, st.st_size)
+    except OSError:
+        return None
+    if _bar_cache["key"] == key:
+        return _bar_cache["ids"]
+    ids = None
+    try:
+        layout = json.loads(path.read_text(encoding="utf-8")).get("bar", {}).get("layout")
+        if isinstance(layout, dict):
+            ids = {str(w.get("id") if isinstance(w, dict) else w)
+                   for section in layout.values() if isinstance(section, list) for w in section}
+    except (OSError, ValueError, AttributeError):
+        ids = None
+    _bar_cache.update(key=key, ids=ids)
+    return ids
+
+
+def extras(menu_actions: set[str], bar_ids: set[str] | None = None) -> list[dict]:
     out = []
     for key, title, subtitle, icon, argv, words, glyph, color in EXTRAS:
         if " ".join(argv) in menu_actions:
+            continue
+        if key.startswith("panel-") and bar_ids is not None and argv[-1] not in bar_ids:
             continue
         out.append({"id": "omarchy:" + key, "title": title, "subtitle": subtitle, "icon": icon,
                     "fallbackIcon": glyph, "fallbackColor": color, "keywords": (title + " " + words).lower(),
@@ -514,7 +558,7 @@ def search(catalog: Catalog, query: str) -> list[dict]:
         result = menu_result(catalog, row, s / (0.85 if row["is_menu"] else 1.0))
         if result is not None:
             out.append(result)
-    for x in extras(menu_actions):
+    for x in extras(menu_actions, bar_widget_ids()):
         s = score(q, x["title"], x["keywords"], x["subtitle"])
         if s > 0:
             out.append(dict(x, score=s))

@@ -195,21 +195,78 @@ class Provider:
         try: self.proc.stdin.write(json.dumps(msg).encode()+b"\n"); await self.proc.stdin.drain()
         except (BrokenPipeError, ConnectionResetError): pass
 
-def _reap(proc):
-    with contextlib.suppress(Exception): proc.wait()
+# Launches mirror how Omarchy itself runs commands (shell/Commons/Util.qml):
+# argv through `bash -lc 'exec "$@"'` (Util.execArgv) and menu action strings
+# through `bash -lc <action>` (Util.execDetached, what Menu.qml runAction does).
+# The login shell sources /etc/profile.d/omarchy.sh (default/bash/env-bootstrap),
+# so omarchy-* scripts get OMARCHY_PATH and PATH even when the shell process
+# that started this host has a thinner environment. Stdin/stdout are detached
+# and the child gets its own session, so closing the palette never kills it.
+LAUNCH_WATCH_S = 4.0
+_emit_lock = threading.Lock()
 
-def spawn_detached(argv):
-    """Run argv without a shell in its own session. Returns an error string or None."""
-    if not isinstance(argv, list) or not argv or not all(isinstance(a, str) and a for a in argv):
-        return "invalid command"
-    if shutil.which(argv[0]) is None:
-        return f"command not found: {argv[0]}"
+def omarchy_bin_dirs():
+    roots = [os.environ.get("OMARCHY_PATH") or "", "/usr/share/omarchy",
+             os.path.expanduser("~/.local/share/omarchy")]
+    seen, out = set(), []
+    for root in roots:
+        d = os.path.join(root, "bin") if root else ""
+        if d and d not in seen and os.path.isdir(d): seen.add(d); out.append(d)
+    return out
+
+def launch_env():
+    """Environment for launched commands: PATH also covers Omarchy's bin dirs
+    (dev-linked or ~/.local/share installs) and OMARCHY_PATH is set if missing."""
+    env = dict(os.environ)
+    parts = [p for p in env.get("PATH", "").split(":") if p]
+    for d in omarchy_bin_dirs() + [os.path.expanduser("~/.local/bin")]:
+        if d not in parts: parts.append(d)
+    env["PATH"] = ":".join(parts or ["/usr/local/bin", "/usr/bin"])
+    if not env.get("OMARCHY_PATH"):
+        for d in omarchy_bin_dirs():
+            env["OMARCHY_PATH"] = os.path.dirname(d); break
+    return env
+
+def _watch(proc, label, on_fail):
+    """Report a launch that dies quickly with a non-zero status; otherwise
+    just reap it. stderr is not captured: a pipe would kill long-running apps
+    with SIGPIPE once the host goes away, and a file would grow unbounded."""
+    code = None
+    with contextlib.suppress(Exception):
+        code = proc.wait(timeout=LAUNCH_WATCH_S)
+    if code is None:
+        with contextlib.suppress(Exception): proc.wait()
+        return
+    if code in (126, 127):
+        # The shell could not find or run it: always worth a notification.
+        msg = f"command not found: {label}" if code == 127 else f"cannot run: {label}"
+        log(f"launch failed: {msg}")
+        if on_fail is not None: on_fail(msg[:300])
+    elif code:
+        # Pickers exit 1 on Esc, toggles report state: log only, no popup.
+        log(f"launch: {label} exited with status {code}")
+
+def spawn_detached(argv=None, command=None, on_fail=None):
+    """Run argv (or a trusted Omarchy menu action string) detached through a
+    login shell. Returns an error string or None; a quick non-zero exit is
+    reported later through on_fail."""
+    env = launch_env()
+    if command is not None:
+        if not isinstance(command, str) or not command.strip():
+            return "invalid command"
+        full, label = ["bash", "-lc", command], command.split(None, 1)[0]
+    else:
+        if not isinstance(argv, list) or not argv or not all(isinstance(a, str) and a for a in argv):
+            return "invalid command"
+        if shutil.which(argv[0], path=env["PATH"]) is None:
+            return f"command not found: {argv[0]}"
+        full, label = ["bash", "-lc", 'exec "$@"', "bash", *argv], argv[0]
     try:
-        proc = subprocess.Popen(argv, stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
-                                start_new_session=True, cwd=os.path.expanduser("~"), close_fds=True)
+        proc = subprocess.Popen(full, stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+                                start_new_session=True, cwd=os.path.expanduser("~"), close_fds=True, env=env)
     except OSError as err:
-        return f"{argv[0]}: {err.strerror or err}"
-    threading.Thread(target=_reap, args=(proc,), daemon=True).start()
+        return f"{label}: {err.strerror or err}"
+    threading.Thread(target=_watch, args=(proc, label, on_fail), daemon=True).start()
     return None
 
 class Host:
@@ -263,9 +320,19 @@ class Host:
     async def on_record(self, msg):
         self.history.record(msg.get("provider"), str(msg.get("result", "")), str(msg.get("title", "")))
     async def on_launch(self, msg):
-        """Launch argv (no shell) on the frontend's behalf so failures are reported."""
-        err = await asyncio.get_running_loop().run_in_executor(None, spawn_detached, msg.get("argv"))
-        reply = {"id": msg.get("id", ""), "executed": err is None}
+        """Launch argv, or a menu action string (`command`), on the frontend's
+        behalf so failures are reported, including a quick non-zero exit."""
+        aid = msg.get("id", "")
+        loop = asyncio.get_running_loop()
+        def failed(error):
+            with contextlib.suppress(RuntimeError):  # loop already closed at shutdown
+                loop.call_soon_threadsafe(self.emit, {"id": aid, "executed": False, "error": error})
+        if "command" in msg:
+            call = lambda: spawn_detached(command=msg.get("command"), on_fail=failed)
+        else:
+            call = lambda: spawn_detached(msg.get("argv"), on_fail=failed)
+        err = await loop.run_in_executor(None, call)
+        reply = {"id": aid, "executed": err is None}
         if err: reply["error"] = err; log(f"launch failed: {err}")
         self.emit(reply)
     async def _merge(self, qid, names, scope, bare):
@@ -321,7 +388,9 @@ class Host:
             else:
                 dirty = True
     @staticmethod
-    def emit(msg): print(json.dumps(msg, separators=(",", ":")), flush=True)
+    def emit(msg):
+        line = json.dumps(msg, separators=(",", ":"))
+        with _emit_lock: print(line, flush=True)
 
 async def read_client(host):
     loop = asyncio.get_running_loop(); reader = asyncio.StreamReader(limit=1 << 16)
