@@ -24,7 +24,7 @@ Append-only audit trail. Add one dated entry per generation or refresh run, reco
 ## 2026-11-01: refresh
 
 - Profile: internal/standard
-- source_commit: the action-log commit on `fix-om-menu-actions` (was c8e65d3)
+- source_commit: 21b3a2e (was c8e65d3)
 - Coverage: login-shell launches, `shell` actions, Omarchy leaf vs submenu, action log. OpenKnowledge MCP was unavailable, so this refresh was written into the git wiki.
 - Pages: [Host](./modules/host.md), [Provider host](./architecture/provider-host.md), [Provider contract](./architecture/provider-contract.md), [Execute](./flows/execute.md), [Action](./concepts/action.md), [omarchy](./modules/omarchy.md), [system](./modules/system.md).
 
