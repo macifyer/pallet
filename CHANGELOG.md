@@ -5,6 +5,12 @@ Release numbers come from the root manifest.json. This changelog starts with
 
 ## [Unreleased]
 
+### Fixed
+- Opening an application (Cursor and the other `.desktop` rows) runs that
+  program directly again. 0.10.1 sent every argv through `bash -lc` and a
+  stderr pipe, which kept normal apps from starting. Omarchy commands
+  (`omarchy-*` and menu `shell` actions) still go through the login shell.
+
 ## [0.10.1]
 
 Fix for Omarchy (`om:`) and system (`s:`) rows that listed fine but did

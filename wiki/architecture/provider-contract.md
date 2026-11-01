@@ -27,7 +27,7 @@ flowchart LR
 
 ## Design decisions
 
-An argv is passed as `bash -lc 'exec "$@"' bash <argv>`, so the login profile runs and the arguments are not interpolated. A `shell` action passes a trusted menu string as `bash -lc <command>`. `Provider._read_stdout()` forwards `executed` replies with `on_reply` so they never enter the search merge. Lines that are not JSON objects are ignored. A manifest is expected to declare every executable the provider may run. That rule is stated in the [provider protocol](../../docs/PROVIDERS.md).
+An ordinary argv is executed directly and is not interpolated. An `omarchy-*` argv is passed as `bash -lc 'exec "$@"' bash <argv>` so the login profile runs. A `shell` action passes a trusted menu string as `bash -lc <command>`. `Provider._read_stdout()` forwards `executed` replies with `on_reply` so they never enter the search merge. Lines that are not JSON objects are ignored. A manifest is expected to declare every executable the provider may run. That rule is stated in the [provider protocol](../../docs/PROVIDERS.md).
 
 ## Related
 

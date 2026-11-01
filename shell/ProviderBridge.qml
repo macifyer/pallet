@@ -79,7 +79,7 @@ Process {
             root.actionCounter += 1;
             root.write(JSON.stringify({ id: "l" + root.actionCounter, op: "launch", argv: argv }) + "\n");
         } else {
-            Quickshell.execDetached(["bash", "-lc", "exec \"$@\"", "bash"].concat(argv));
+            Quickshell.execDetached(argv);
         }
     }
     function runShell(command: string): void {

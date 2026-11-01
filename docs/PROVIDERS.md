@@ -68,8 +68,11 @@ Client to host (besides `search`/`cancel`/`execute`/`warm`):
 
 ## Action types
 
-- `launch` — argv array, spawned detached by the host as `bash -lc 'exec "$@"' bash <argv>`
-  (Omarchy's `Util.execArgv`; no interpolation); a missing command is reported back
+- `launch` — argv array, spawned detached by the host. Ordinary programs
+  (applications, `xdg-open`, `wl-copy`) are executed directly. An `omarchy-*`
+  argv is the exception: `bash -lc 'exec "$@"' bash <argv>`, so those scripts
+  see the login profile. Arguments are not interpolated. A missing command is
+  reported back.
 - `shell` — `command` string run as `bash -lc <command>`, detached. Only for trusted
   command strings that come from Omarchy's own menu files (never from a query)
 - `copy` — put text on the clipboard (frontend)
@@ -79,8 +82,8 @@ Client to host (besides `search`/`cancel`/`execute`/`warm`):
 `launch` and `shell` are appended to `$XDG_STATE_HOME/pallet/actions.jsonl`
 (one JSON object per launch; `PALLET_ACTION_LOG` overrides the path and
 `PALLET_ACTION_LOG=0` disables it). The line has the command, argv, the
-`bash -lc` exec, pid, exit code, a short stderr snippet, and an environment
-snapshot. Reading it does not make a row succeed.
+exec that actually ran, pid, exit code, a short stderr snippet for login-shell
+launches, and an environment snapshot. Reading it does not make a row succeed.
 
 ## Action metadata
 

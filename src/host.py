@@ -253,6 +253,44 @@ def _read_stderr(fd, chunks, total):
             total += len(take)
     return total, eof
 
+def _argv_needs_login_shell(argv):
+    name = os.path.basename(argv[0]) if argv else ""
+    return name == "omarchy" or name.startswith("omarchy-")
+
+def _watch_exit(proc, record, on_fail, path):
+    code = None
+    try:
+        code = proc.wait(timeout=LAUNCH_WATCH_S)
+    except subprocess.TimeoutExpired:
+        code = None
+    record["stderr"] = ""
+    record["phase"] = "watch"
+    record["exit"] = code
+    record["running"] = code is None
+    append_action_log(record, path)
+    if code is None:
+        threading.Thread(target=_reap, args=(proc, dict(record), path), daemon=True).start()
+        return
+    _report_exit(record, on_fail, code)
+
+def _reap(proc, record, path):
+    with contextlib.suppress(Exception):
+        record["exit"] = proc.wait()
+    record["phase"] = "exit"
+    record["running"] = False
+    record["ts"] = time.time()
+    record["stderr"] = ""
+    append_action_log(record, path)
+
+def _report_exit(record, on_fail, code):
+    label = record.get("label") or "command"
+    if code in (126, 127):
+        msg = f"command not found: {label}" if code == 127 else f"cannot run: {label}"
+        log(f"launch failed: {msg}")
+        if on_fail is not None: on_fail(msg[:300])
+    elif code:
+        log(f"launch: {label} exited with status {code}")
+
 def _watch(proc, record, on_fail, path):
     fd = proc.stderr.fileno()
     os.set_blocking(fd, False)
@@ -281,13 +319,7 @@ def _watch(proc, record, on_fail, path):
     if code is None:
         threading.Thread(target=_follow, args=(proc, fd, dict(record), path), daemon=True).start()
         return
-    label = record.get("label") or "command"
-    if code in (126, 127):
-        msg = f"command not found: {label}" if code == 127 else f"cannot run: {label}"
-        log(f"launch failed: {msg}")
-        if on_fail is not None: on_fail(msg[:300])
-    elif code:
-        log(f"launch: {label} exited with status {code}")
+    _report_exit(record, on_fail, code)
     if proc.stderr is not None:
         with contextlib.suppress(Exception):
             proc.stderr.close()
@@ -326,6 +358,7 @@ def spawn_detached(argv=None, command=None, on_fail=None, action_id=""):
             append_action_log(record, path)
             return "invalid command"
         full, label = ["bash", "-lc", command], command.split(None, 1)[0]
+        stderr = subprocess.PIPE
         record["command"] = command
     else:
         if not isinstance(argv, list) or not argv or not all(isinstance(a, str) and a for a in argv):
@@ -337,13 +370,18 @@ def spawn_detached(argv=None, command=None, on_fail=None, action_id=""):
             record.update(phase="reject", error=err, argv=argv, label=argv[0], command=argv[0])
             append_action_log(record, path)
             return err
-        full, label = ["bash", "-lc", 'exec "$@"', "bash", *argv], argv[0]
         record["argv"] = list(argv)
         record["command"] = " ".join(argv)
+        if _argv_needs_login_shell(argv):
+            full, label = ["bash", "-lc", 'exec "$@"', "bash", *argv], argv[0]
+            stderr = subprocess.PIPE
+        else:
+            full, label = list(argv), argv[0]
+            stderr = subprocess.DEVNULL
     record["label"] = label
     record["exec"] = full
     try:
-        proc = subprocess.Popen(full, stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.PIPE,
+        proc = subprocess.Popen(full, stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=stderr,
                                 start_new_session=True, cwd=os.path.expanduser("~"), close_fds=True, env=env)
     except OSError as err:
         message = f"{label}: {err.strerror or err}"
@@ -351,7 +389,8 @@ def spawn_detached(argv=None, command=None, on_fail=None, action_id=""):
         append_action_log(record, path)
         return message
     record["pid"] = proc.pid
-    threading.Thread(target=_watch, args=(proc, record, on_fail, path), daemon=True).start()
+    watch = _watch if proc.stderr not in (None, subprocess.DEVNULL) else _watch_exit
+    threading.Thread(target=watch, args=(proc, record, on_fail, path), daemon=True).start()
     return None
 
 class Host:
