@@ -1,19 +1,5 @@
 #!/usr/bin/env python3
-"""Measure Pallet host latency: time-to-first and time-to-final per query.
 
-The bench copies the plugin into a temporary directory, points the host at a
-synthetic $HOME (so the files provider indexes a realistic tree without
-touching real data), optionally adds a slow "straggler" provider that stands
-in for a heavy AT-SPI menu walk, and then drives the host over its normal
-NDJSON stdin/stdout contract.
-
-  python3 scripts/bench_host.py                 # default scenario
-  python3 scripts/bench_host.py --files 60000 --straggler-ms 1500 --json
-
-Older hosts emit one message per query; newer hosts may emit early partial
-messages and mark the last one with "final": true. Both are handled: a message
-without a "final" key is treated as final.
-"""
 from __future__ import annotations
 
 import argparse
@@ -51,7 +37,6 @@ for line in sys.stdin:
           "actions": [{"type": "copy", "text": "x"}]}]}), flush=True)
 '''
 
-
 def make_home(count: int) -> Path:
     home = Path(tempfile.gettempdir()) / f"pallet-bench-home-{count}"
     marker = home / ".pallet-bench-complete"
@@ -75,7 +60,6 @@ def make_home(count: int) -> Path:
     marker.touch()
     return home
 
-
 def stage_plugin(straggler_ms: int) -> Path:
     stage = Path(tempfile.mkdtemp(prefix="pallet-bench-"))
     for part in ("src", "providers"):
@@ -88,7 +72,6 @@ def stage_plugin(straggler_ms: int) -> Path:
             "name": "slowpoke", "exec": ["python3", "providers/slowpoke/provider.py", str(straggler_ms / 1000)]}))
     return stage
 
-
 class HostClient:
     def __init__(self, stage: Path, home: Path):
         env = dict(os.environ, HOME=str(home), XDG_DATA_HOME=str(home / ".local/share"))
@@ -98,11 +81,9 @@ class HostClient:
                                      stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, env=env, cwd=stage, text=True, bufsize=1)
         self.buf = ""
         self.n = 0
-
     def send(self, msg):
         self.proc.stdin.write(json.dumps(msg) + "\n")
         self.proc.stdin.flush()
-
     def readline(self, timeout: float):
         end = time.monotonic() + timeout
         while "\n" not in self.buf:
@@ -118,7 +99,6 @@ class HostClient:
             self.buf += chunk
         line, self.buf = self.buf.split("\n", 1)
         return json.loads(line) if line.strip() else {}
-
     def query(self, text: str, timeout: float = 5.0, sent_at: float | None = None):
         self.n += 1
         qid = f"b{self.n}"
@@ -142,7 +122,6 @@ class HostClient:
                 final = now
                 break
         return {"query": text, "first_ms": first, "final_ms": final, "files_ms": first_files, "results": count}
-
     def close(self):
         try:
             self.proc.stdin.close()
@@ -150,10 +129,8 @@ class HostClient:
         except Exception:
             self.proc.kill()
 
-
 def fmt(v):
     return "  -  " if v is None else f"{v:7.1f}"
-
 
 def main():
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
@@ -162,16 +139,13 @@ def main():
     ap.add_argument("--rounds", type=int, default=3, help="warm rounds per query (median reported)")
     ap.add_argument("--json", action="store_true")
     args = ap.parse_args()
-
     home = make_home(args.files)
     stage = stage_plugin(args.straggler_ms)
     report = {"files": args.files, "straggler_ms": args.straggler_ms, "cold": None, "warm": [], "typing": []}
     try:
         client = HostClient(stage, home)
-        # Cold: query the instant the host is spawned, like a palette opened at login.
         cold = client.query("notes", timeout=15.0, sent_at=client.t0)
         report["cold"] = cold
-        # Let background work (if any) settle before measuring warm latency.
         time.sleep(2.0)
         client.query("warmup", timeout=5.0)
         for q in WARM_QUERIES:
@@ -187,7 +161,6 @@ def main():
         client.close()
     finally:
         shutil.rmtree(stage, ignore_errors=True)
-
     if args.json:
         print(json.dumps(report, indent=2))
         return
@@ -202,7 +175,6 @@ def main():
     print("typing 'config' one key at a time:")
     for r in report["typing"]:
         print(f"  {r['query']:<12}{fmt(r['first_ms']):>10}{fmt(r['final_ms']):>10}{r['results']:>9}")
-
 
 if __name__ == "__main__":
     main()

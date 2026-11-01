@@ -26,7 +26,6 @@ class HostTests(unittest.TestCase):
             self.assertEqual(host.split_scope(prefix + ': notes'), (expected, 'notes'))
         self.assertEqual(host.split_scope('https://example.com'), ('', 'https://example.com'))
         self.assertEqual(host.split_scope('files:'), ('files', ''))
-
     def run_host(self, messages, worker=WORKER):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
@@ -46,7 +45,6 @@ class HostTests(unittest.TestCase):
             )
             self.assertEqual(proc.returncode, 0, proc.stderr)
             return [json.loads(line) for line in proc.stdout.splitlines()]
-
     def test_eof_preserves_final_scoped_response(self):
         messages = self.run_host([{'id': 't', 'op': 'search', 'query': 'obsidian:notes'}])
         self.assertEqual(len(messages), 1)
@@ -54,7 +52,6 @@ class HostTests(unittest.TestCase):
         self.assertEqual(messages[0]['scope'], 'obsidian')
         self.assertEqual(messages[0]['bare'], 'notes')
         self.assertEqual([r['provider'] for r in messages[0]['results']], ['obsidian'])
-
     def test_latest_query_wins_at_eof(self):
         messages = self.run_host([
             {'id': 'old', 'op': 'search', 'query': 'obsidian:old'},
@@ -63,7 +60,6 @@ class HostTests(unittest.TestCase):
         self.assertEqual(messages[-1]['id'], 'new')
         self.assertEqual(messages[-1]['bare'], 'new')
         self.assertEqual([r['provider'] for r in messages[-1]['results']], ['apps'])
-
     def test_slow_provider_still_returns_at_deadline(self):
         messages = self.run_host([{'id': 't', 'op': 'search', 'query': 'obsidian:notes'}],
                                  'import time; time.sleep(10)')

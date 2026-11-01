@@ -16,17 +16,10 @@ PanelWindow {
     property string flashMessage: ""
     property string scopeLabel: "All"
     property string statusText: ""
-    // Selection follows the same result across streamed updates once the
-    // user has moved it; until then the top row stays selected.
     property bool userMoved: false
-    // Last raw host results, the query text sent for them and the bare query
-    // the host matched. Used to re-rank instantly on the next keystroke while
-    // the host catches up, and to keep slow providers' rows while streaming.
     property var lastRaw: []
     property string lastQuery: ""
     property string lastBare: ""
-    // Streamed update held back while the action panel is open, so a late
-    // provider can never swap the result under an open confirmation sheet.
     property var deferredUpdate: null
     readonly property bool opened: visible
     visible: false
@@ -108,14 +101,11 @@ PanelWindow {
             if (!root.visible) return;
             const info = meta || { final: true, pending: [], failed: [], incremental: false };
             if (info.incremental && root.panelOpen) {
-                // Never swap rows under an open action panel or confirmation.
                 root.deferredUpdate = { results: results, scope: scope, bare: bare, unresolved: unresolved, meta: info };
                 return;
             }
             const selected = Fuzzy.keyOf(root.filtered[root.selectedIndex]);
             root.scopeLabel = scope || "All";
-            // Until the final message, providers that have not answered keep
-            // their previous rows (re-ranked below), so nothing blinks out.
             const rows = QueryState.carryOver(root.lastRaw, results, info.pending, info.final);
             root.lastRaw = rows;
             root.lastQuery = typeof info.query === "string" ? info.query : searchInput.text.trim();
@@ -143,11 +133,6 @@ PanelWindow {
         }
         onActionFailed: message => {
             const text = message.length > 0 ? message : qsTr("the target may already be gone.");
-            // Actions dismiss the overlay first, so also raise a desktop
-            // notification (bin/omarchy-notification-send). The description
-            // is prefixed so it can never be parsed as an option.
-            // Through a login shell so the notifier resolves even when this
-            // process's PATH lacks Omarchy's bin directory.
             Quickshell.execDetached(["bash", "-lc", "exec \"$@\"", "bash", "omarchy-notification-send", "--app-name", "Pallet", "-u", "normal",
                 qsTr("Pallet action failed"), qsTr("Error: ") + text]);
             if (!root.visible) return;
@@ -180,11 +165,6 @@ PanelWindow {
         actionPanel.reset();
     }
     function inputChanged(): void {
-        // Invalidate on the keystroke, not after the debounce window: the
-        // old query is cancelled (its late replies are dropped) and any open
-        // panel or confirmation closes. The list is only blanked for an empty
-        // query: otherwise the last answer is re-ranked locally against the
-        // new text, or kept as shown, until the new answer arrives.
         const text = searchInput.text.trim();
         const raw = root.lastRaw || [];
         const shown = root.filtered.filter(r => r && r.id !== "pallet.error");
@@ -210,8 +190,6 @@ PanelWindow {
     }
     function open(): void { visible = true; scopeLabel = "All"; }
     function close(): void {
-        // Esc on a confirmation card or the action list cancels it and goes
-        // straight back to the results (not from the card to the actions).
         if (actionPanel.confirming || root.panelOpen) {
             root.panelOpen = false;
             actionPanel.reset();

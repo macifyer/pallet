@@ -1,10 +1,5 @@
 #!/usr/bin/env python3
-"""Discover XDG desktop applications, including Terminal=true entries.
 
-Search never launches programs. Terminal entries use xdg-terminal-exec when
-available, then supported terminal fallbacks. Executable-only tools without
-desktop entries are outside this provider's scope.
-"""
 from __future__ import annotations
 import json
 import os
@@ -21,7 +16,6 @@ CHECK_TTL_S = 10
 _apps: list[dict] = []
 _checked_at = float('-inf')
 
-
 def desktop_dirs() -> list[Path]:
     home = Path.home()
     user = Path(os.environ.get('XDG_DATA_HOME') or home / '.local/share')
@@ -33,14 +27,12 @@ def desktop_dirs() -> list[Path]:
     roots += [Path('/var/lib/flatpak/exports/share/applications'), Path('/var/lib/snapd/desktop/applications')]
     return list(dict.fromkeys(roots))
 
-
 def resolves(token: str) -> bool:
     if not token:
         return False
     if '/' in token:
         return Path(token).is_absolute() and Path(token).is_file() and os.access(token, os.X_OK)
     return shutil.which(token) is not None
-
 
 def split_exec(line: str, name: str = '', icon: str = '', desktop: str = '') -> list[str]:
     try:
@@ -58,12 +50,10 @@ def split_exec(line: str, name: str = '', icon: str = '', desktop: str = '') -> 
         if token in ('%c', '%k'):
             out.append(name if token == '%c' else desktop)
             continue
-        # Unknown or embedded field codes are not guessed. %% is literal %.
         if '%' in token.replace('%%', ''):
             return []
         out.append(token.replace('%%', '%'))
     return out
-
 
 def terminal_argv(argv: list[str]) -> list[str] | None:
     for executable, prefix in (
@@ -76,7 +66,6 @@ def terminal_argv(argv: list[str]) -> list[str] | None:
         if shutil.which(executable):
             return prefix + argv
     return None
-
 
 def parse_desktop(path: Path) -> dict | None:
     try:
@@ -132,7 +121,6 @@ def parse_desktop(path: Path) -> dict | None:
         'keywords': (fields.get('Keywords', '').replace(';', ' ') + ' ' + Path(argv[0]).name).lower(),
     }
 
-
 def load_apps() -> list[dict]:
     seen = set()
     apps = []
@@ -147,7 +135,6 @@ def load_apps() -> list[dict]:
             desktop_id = desktop.relative_to(directory).as_posix().replace('/', '-')
             if desktop_id in seen:
                 continue
-            # Hidden/user overrides suppress lower-priority copies too.
             seen.add(desktop_id)
             app = parse_desktop(desktop)
             if app is not None:
@@ -155,23 +142,17 @@ def load_apps() -> list[dict]:
                 apps.append(app)
     return sorted(apps, key=lambda a: (a['name'].lower(), a['desktop_id']))
 
-
 _refreshing = threading.Lock()
-
 
 def _refresh() -> None:
     global _apps, _checked_at
     try:
         apps = load_apps()
-        _apps, _checked_at = apps, time.monotonic()  # atomic swap
+        _apps, _checked_at = apps, time.monotonic()
     finally:
         _refreshing.release()
 
-
 def ensure_fresh(force: bool = False) -> None:
-    """Load synchronously the first time (or when forced); afterwards a stale
-    list keeps serving while a background thread rescans the .desktop dirs,
-    so a keystroke never pays for the rescan."""
     global _apps, _checked_at
     now = time.monotonic()
     if force or _checked_at == float('-inf'):
@@ -179,7 +160,6 @@ def ensure_fresh(force: bool = False) -> None:
         return
     if now - _checked_at >= CHECK_TTL_S and _refreshing.acquire(blocking=False):
         threading.Thread(target=_refresh, name='apps-refresh', daemon=True).start()
-
 
 def score(query: str, app: dict) -> float:
     name = app['name'].lower()
@@ -192,7 +172,6 @@ def score(query: str, app: dict) -> float:
     if query in app['subtitle'].lower() or query in app['keywords']:
         return 0.45
     return 0.0
-
 
 def actions_for(app: dict) -> list[dict]:
     def wrap(argv):
@@ -207,7 +186,6 @@ def actions_for(app: dict) -> list[dict]:
             actions.append({'type': 'launch', 'title': extra['title'], 'argv': command})
     actions.append({'type': 'copy', 'title': 'Copy name', 'text': app['name']})
     return actions
-
 
 def search(query: str) -> list[dict]:
     q = query.strip().lower()
@@ -231,7 +209,6 @@ def search(query: str) -> list[dict]:
             'keywords': app['keywords'], 'score': rank, 'provider': 'apps', 'actions': actions,
         })
     return results
-
 
 def main() -> None:
     ensure_fresh(force=True)

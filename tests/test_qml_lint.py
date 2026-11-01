@@ -1,6 +1,4 @@
-"""Cheap structural QML checks: Quickshell refuses a component whose object
-sets the same property twice ("Property value set multiple times"), which
-silently made the whole palette unavailable in 0.10.0 development."""
+
 import glob
 import os
 import re
@@ -8,7 +6,6 @@ import unittest
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 SKIP = ("function", "signal", "property", "required", "readonly", "import")
-
 
 def duplicate_bindings(path):
     found = []
@@ -29,7 +26,6 @@ def duplicate_bindings(path):
                     stack.pop()
     return found
 
-
 class QmlLintTests(unittest.TestCase):
     def test_no_property_set_twice_in_one_object(self):
         files = glob.glob(os.path.join(ROOT, "*.qml")) + glob.glob(os.path.join(ROOT, "shell", "*.qml"))
@@ -39,7 +35,6 @@ class QmlLintTests(unittest.TestCase):
             for n, key, first in duplicate_bindings(f):
                 problems.append(f"{os.path.relpath(f, ROOT)}:{n} {key} (first set on line {first})")
         self.assertEqual(problems, [])
-
 
 if __name__ == "__main__":
     unittest.main()
