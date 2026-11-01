@@ -15,4 +15,4 @@ flowchart LR
   Host --> History[(History)]
 ```
 
-The [shell](../modules/shell.md) starts the [host](../modules/host.md), which discovers [providers](../concepts/provider.md), routes searches and merges responses. See the [search flow](../flows/search.md) and [action flow](../flows/execute.md). The host keeps subprocess boundaries between UI and providers; the manifest-based protocol is documented in [Provider protocol](../../docs/PROVIDERS.md).
+The [shell](../modules/shell.md) starts the [host](../modules/host.md), which discovers [providers](../concepts/provider.md), routes searches, and merges responses. The layers are the [plugin shell](./plugin-shell.md), the [provider host](./provider-host.md), and the [provider contract](./provider-contract.md). See [summon](../flows/summon.md), [search](../flows/search.md), and [execute](../flows/execute.md). The manifest-based protocol is documented in [Provider protocol](../../docs/PROVIDERS.md).
