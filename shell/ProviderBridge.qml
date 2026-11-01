@@ -5,6 +5,10 @@ import "QueryState.js" as QueryState
 
 Process {
     id: root
+    // meta: { final, pending, failed, incremental, query } — incremental is
+    // true for follow-up messages under the query id already delivered, so the
+    // window can merge without resetting the selection; query is the text
+    // sent for that id (not whatever the input holds when the reply lands).
     signal resultsReady(var results, string scope, string bare, var unresolved, var meta)
     signal hostError(string message)
     signal actionFailed(string message)
@@ -21,6 +25,7 @@ Process {
     command: ["python3", hostPath]
     running: true
     stdinEnabled: true
+
     stdout: SplitParser {
         onRead: data => {
             let msg;
@@ -69,10 +74,14 @@ Process {
         root.activeQuery = query;
         root.write(JSON.stringify({ id: id, op: "search", query: query }) + "\n");
     }
+    // Overlay opened: let providers refresh caches before the first keystroke.
     function warm(): void {
         if (root.running)
             root.write(JSON.stringify({ id: "", op: "warm" }) + "\n");
     }
+    // Run argv without a shell. The host launches it (through a login shell,
+    // like Omarchy's Util.execArgv) so a missing command is reported back; if
+    // the host is down, fall back to the same detached login-shell exec.
     function launch(argv: var): void {
         if (!Array.isArray(argv) || argv.length === 0) return;
         if (root.running) {
@@ -82,6 +91,8 @@ Process {
             Quickshell.execDetached(["bash", "-lc", "exec \"$@\"", "bash"].concat(argv));
         }
     }
+    // Run a trusted Omarchy menu action string exactly as the native menu does
+    // (Menu.qml runAction -> Util.execDetached: bash -lc <action>).
     function runShell(command: string): void {
         if (!command) return;
         if (root.running) {
@@ -91,6 +102,7 @@ Process {
             Quickshell.execDetached(["bash", "-lc", command]);
         }
     }
+    // Remember what was chosen so the host can boost it next time (frecency).
     function record(result: var): void {
         if (!root.running || !result || typeof result.provider !== "string") return;
         root.write(JSON.stringify({ id: "", op: "record", provider: result.provider,

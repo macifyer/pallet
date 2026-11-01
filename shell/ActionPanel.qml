@@ -2,11 +2,19 @@ import QtQuick
 import QtQuick.Layouts
 import "Fuzzy.js" as Fuzzy
 
+// Action panel: a small floating list of actions for the selected result,
+// positioned to the right of the palette box. Actions carrying
+// "danger": "confirm" do not execute on Enter; the panel swaps to a
+// confirmation sheet (“danger sheet”) and only a second Enter runs them.
 Rectangle {
     id: root
+
     required property var result
+    // Current search text; a confirmation is bound to the exact result and
+    // query it was opened for.
     property string query: ""
     signal actionExecuted(var action, var result)
+
     width: 240
     height: confirming
         ? Math.min(confirmColumn.implicitHeight + 20, 320)
@@ -15,17 +23,22 @@ Rectangle {
     color: "#1e1e2e"
     border.width: 1
     border.color: confirming ? root.confirmColor() : "#45475a"
+
+    // Non-null while a danger-gated action awaits its second Enter.
     property var pendingConfirm: null
     property string confirmKey: ""
     property string confirmQuery: ""
     property string resultKey: Fuzzy.keyOf(result)
     readonly property bool confirming: pendingConfirm !== null
+
     ColumnLayout {
         id: column
+
         visible: !root.confirming
         anchors.fill: parent
         anchors.margins: 8
         spacing: 2
+
         Text {
             textFormat: Text.PlainText
             Layout.fillWidth: true
@@ -34,21 +47,27 @@ Rectangle {
             font.pixelSize: 11
             font.bold: true
         }
+
         Rectangle {
             Layout.fillWidth: true
             height: 1
             color: "#313244"
         }
+
         Repeater {
             model: root.result && root.result.actions ? root.result.actions : []
+
             Rectangle {
                 id: actionDelegate
+
                 required property var modelData
                 required property int index
+
                 Layout.fillWidth: true
                 height: 32
                 radius: 6
                 color: root.actionIndex === index ? "#45475a" : "transparent"
+
                 Text {
                     textFormat: Text.PlainText
                     anchors.left: parent.left
@@ -61,12 +80,15 @@ Rectangle {
             }
         }
     }
+
     ColumnLayout {
         id: confirmColumn
+
         visible: root.confirming
         anchors.fill: parent
         anchors.margins: 10
         spacing: 6
+
         Text {
             textFormat: Text.PlainText
             Layout.fillWidth: true
@@ -76,6 +98,7 @@ Rectangle {
             font.bold: true
             wrapMode: Text.WordWrap
         }
+
         Text {
             textFormat: Text.PlainText
             Layout.fillWidth: true
@@ -84,7 +107,9 @@ Rectangle {
             font.pixelSize: 12
             wrapMode: Text.WordWrap
         }
+
         Item { Layout.fillHeight: true }
+
         Text {
             textFormat: Text.PlainText
             Layout.fillWidth: true
@@ -93,7 +118,9 @@ Rectangle {
             font.pixelSize: 11
         }
     }
+
     property int actionIndex: 0
+
     function actionLabel(action: var): string {
         if (action.title !== undefined && String(action.title).length > 0)
             return String(action.title);
@@ -114,6 +141,10 @@ Rectangle {
         default: return action.type;
         }
     }
+
+    // Tone is visual semantics; danger controls the behavioral confirmation
+    // gate. A safe-but-impactful maintenance task can therefore be positive
+    // (green) while still requiring an explicit second Enter.
     function actionColor(action: var): string {
         switch (action.tone) {
         case "positive": return "#a6e3a1";
@@ -122,21 +153,25 @@ Rectangle {
         default:           return "#f9e2af";
         }
     }
+
     function confirmColor(): string {
         return root.pendingConfirm ? root.actionColor(root.pendingConfirm) : "#f38ba8";
     }
+
     function confirmTitle(): string {
         const c = root.pendingConfirm ? root.pendingConfirm.confirmation : null;
         if (c && c.title && String(c.title).length > 0)
             return String(c.title);
         return qsTr("Are you sure?");
     }
+
     function confirmDetail(): string {
         const c = root.pendingConfirm ? root.pendingConfirm.confirmation : null;
         if (c && c.detail && String(c.detail).length > 0)
             return String(c.detail);
         return qsTr("This action cannot be undone from here.");
     }
+
     function moveAction(step: int): void {
         if (root.confirming)
             return;
@@ -144,11 +179,13 @@ Rectangle {
         if (count === 0) return;
         actionIndex = (actionIndex + step + count) % count;
     }
+
     function executeCurrent(): void {
         if (root.confirming) {
             const action = root.pendingConfirm;
             const valid = root.confirmKey === Fuzzy.keyOf(root.result) && root.confirmQuery === root.query;
             root.cancelConfirm();
+            // The selection or query changed under the sheet: never run it.
             if (valid)
                 actionExecuted(action, root.result);
             return;
@@ -162,20 +199,26 @@ Rectangle {
         }
         actionExecuted(action, root.result);
     }
+
     function openConfirm(action: var): void {
         confirmKey = Fuzzy.keyOf(root.result);
         confirmQuery = root.query;
         pendingConfirm = action;
     }
+
     function cancelConfirm(): void {
         pendingConfirm = null;
         confirmKey = "";
         confirmQuery = "";
     }
+
     function reset(): void {
         cancelConfirm();
         actionIndex = 0;
     }
+
+    // Reset when the selected result changes identity (provider + id), not
+    // merely when a streamed update re-creates the same row object.
     onResultKeyChanged: reset()
     onQueryChanged: cancelConfirm()
 }

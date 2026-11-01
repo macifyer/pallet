@@ -1,5 +1,19 @@
 #!/usr/bin/env python3
+"""Pallet core host: fans a query out to providers and streams merged results.
 
+Scope prefixes (`files:`/`f:`, `obsidian:`/`o:`, `apps:`/`a:`, `omarchy:`/`om:`,
+`system:`/`sys:`, `windows:`/`w:`, `menus:`/`m:`, `plugins:`/`p:`, `run:`,
+`web:`) focus one provider. The prefix is stripped before providers see it;
+responses echo `scope` and `bare` so UI ranking matches what providers matched.
+
+Streaming contract (backwards compatible): every message for a query carries
+the *complete* merged result set so far, so a consumer that only keeps the
+last message per id still sees everything. Early messages carry
+`"final": false` and list the providers still `pending`; the final message has
+`"final": true` and lists `unresolved` providers (timed out or failed). A
+provider that answers after the deadline produces one more final message with
+the late results while its query is still current.
+"""
 from __future__ import annotations
 import asyncio
 import contextlib
@@ -14,16 +28,19 @@ import time
 from pathlib import Path
 ROOT = Path(__file__).resolve().parent.parent
 PROVIDERS_DIR = ROOT / "providers"
-
+# Deadline for the final message (footer reports providers missing it).
 MERGE_TIMEOUT_S = 0.6
-
+# First partial emit waits this long after the request so near-simultaneous
+# replies land in one paint instead of several.
 EARLY_EMIT_S = 0.012
-
+# Later partial emits are coalesced to at most one per window.
 COALESCE_S = 0.03
-
+# After the final message, keep listening this long for stragglers (only while
+# the client is connected) so slow providers still show up instead of vanishing.
 LATE_GRACE_S = 2.5
 RESTART_BACKOFF_S = 30.0
-
+# Frecency: chosen results get a small `recent` boost (0..1) the frontend
+# folds into ranking *within* a match tier. Typed commands are never stored.
 HISTORY_MAX = 400
 HISTORY_HALF_LIFE_S = 14 * 86400
 HISTORY_SKIP = {"run"}
@@ -74,6 +91,10 @@ def history_path():
     return Path(base) / "pallet" / "history.json"
 
 class History:
+    """Per-result use counts with exponential decay, persisted as JSON.
+
+    Disabled with PALLET_HISTORY=0. Keys match the frontend's Fuzzy.keyOf:
+    provider + NUL + (id or title)."""
     def __init__(self, path=None, enabled=None):
         self.enabled = os.environ.get("PALLET_HISTORY", "1") != "0" if enabled is None else enabled
         self.path = path or history_path()
@@ -129,7 +150,8 @@ class Provider:
         spec = spec or {}
         self.name, self.argv, self.inbox, self.proc = name, argv, inbox, None
         self.on_reply = on_reply
-
+        # Routing hints from the manifest. `minQuery`: skip unscoped queries
+        # shorter than this. `scopedOnly`: only answer when explicitly scoped.
         self.min_query = _int(spec.get("minQuery"), 0)
         self.scoped_only = spec.get("scopedOnly") is True
         self.started_at = 0.0
@@ -146,6 +168,7 @@ class Provider:
         except OSError as err: log(f"{self.name}: failed to start: {err}"); self.proc = None; return
         asyncio.create_task(self._read_stdout(self.proc)); asyncio.create_task(self._read_stderr(self.proc))
     async def ensure_running(self):
+        """Restart a crashed provider at most once per backoff window."""
         if self.alive or time.monotonic() - self.started_at < RESTART_BACKOFF_S: return
         self.restarts += 1
         log(f"{self.name}: restarting (attempt {self.restarts})")
@@ -159,7 +182,8 @@ class Provider:
                 except json.JSONDecodeError: continue
                 if not isinstance(msg, dict): continue
                 if "executed" in msg and self.on_reply is not None:
-
+                    # Action replies go straight to the client; they never
+                    # belong to a search merge.
                     self.on_reply(self.name, msg); continue
                 await self.inbox.put((self.name, msg))
         except (ValueError, asyncio.LimitOverrunError) as err:
@@ -172,10 +196,22 @@ class Provider:
         try: self.proc.stdin.write(json.dumps(msg).encode()+b"\n"); await self.proc.stdin.drain()
         except (BrokenPipeError, ConnectionResetError): pass
 
+# Launches mirror how Omarchy itself runs commands (shell/Commons/Util.qml):
+# argv through `bash -lc 'exec "$@"'` (Util.execArgv) and menu action strings
+# through `bash -lc <action>` (Util.execDetached, what Menu.qml runAction does).
+# The login shell sources /etc/profile.d/omarchy.sh (default/bash/env-bootstrap),
+# so omarchy-* scripts get OMARCHY_PATH and PATH even when the shell process
+# that started this host has a thinner environment. Stdin/stdout are detached
+# and the child gets its own session, so closing the palette never kills it.
+# stderr stays on a pipe the host reads: a bounded snippet is written to the
+# action log, and a drain thread keeps the pipe open so a long-running child
+# does not block or die with SIGPIPE while this service is up.
 LAUNCH_WATCH_S = 4.0
 STDERR_CAP = 4096
 _emit_lock = threading.Lock()
 _action_log_lock = threading.Lock()
+# Values that explain a vanished Omarchy command. Other variables are recorded
+# by name only, so a token in the environment is not copied into the log.
 ENV_SNAPSHOT_KEYS = (
     "PATH", "OMARCHY_PATH", "HOME", "SHELL", "USER", "LOGNAME",
     "XDG_CONFIG_HOME", "XDG_DATA_HOME", "XDG_STATE_HOME", "XDG_RUNTIME_DIR",
@@ -192,6 +228,8 @@ def omarchy_bin_dirs():
     return out
 
 def launch_env():
+    """Environment for launched commands: PATH also covers Omarchy's bin dirs
+    (dev-linked or ~/.local/share installs) and OMARCHY_PATH is set if missing."""
     env = dict(os.environ)
     parts = [p for p in env.get("PATH", "").split(":") if p]
     for d in omarchy_bin_dirs() + [os.path.expanduser("~/.local/bin")]:
@@ -203,7 +241,8 @@ def launch_env():
     return env
 
 def action_log_path():
-    # Unfinished: om:/s: rows still do not run in the Omarchy VM. Next agent: on a fresh boot, read this log (command, exit, stderr, PATH, OMARCHY_PATH) and fix the launch it shows dying.
+    """One JSON object per line for each launch. PALLET_ACTION_LOG=0 disables
+    it; any other value is the file path. The default sits next to history."""
     override = os.environ.get("PALLET_ACTION_LOG")
     if override == "0":
         return None
@@ -234,22 +273,29 @@ def _stderr_text(chunks):
     return b"".join(chunks).decode("utf-8", "replace")[:STDERR_CAP]
 
 def _read_stderr(fd, chunks, total):
+    """Non-blocking read. Returns (total, eof). Bytes past STDERR_CAP are
+    discarded so the child does not stall on a full pipe."""
     eof = False
     while True:
         try:
             data = os.read(fd, 65536)
         except BlockingIOError:
-            return total, eof
+            break
         except OSError:
-            return total, True
+            eof = True
+            break
         if not data:
-            return total, True
+            eof = True
+            break
         if total < STDERR_CAP:
             take = data[:STDERR_CAP - total]
             chunks.append(take)
             total += len(take)
+    return total, eof
 
 def _watch(proc, record, on_fail, path):
+    """Record the launch after LAUNCH_WATCH_S, or sooner if it exits. A child
+    still running keeps a drain thread until it exits."""
     fd = proc.stderr.fileno()
     os.set_blocking(fd, False)
     chunks, total = [], 0
@@ -279,24 +325,31 @@ def _watch(proc, record, on_fail, path):
         return
     label = record.get("label") or "command"
     if code in (126, 127):
+        # The shell could not find or run it: always worth a notification.
         msg = f"command not found: {label}" if code == 127 else f"cannot run: {label}"
         log(f"launch failed: {msg}")
         if on_fail is not None: on_fail(msg[:300])
     elif code:
-        log(f"launch: {record.get('label')} exited with status {code}")
+        # Pickers exit 1 on Esc, toggles report state: log only, no popup.
+        log(f"launch: {label} exited with status {code}")
     if proc.stderr is not None:
         with contextlib.suppress(Exception):
             proc.stderr.close()
 
 def _follow(proc, fd, record, path):
-    chunks, total = [], 0
-    while True:
+    """Keep draining stderr until the child exits, then log that exit.
+    stderr here is only what arrived after the watch record."""
+    chunks, total, eof = [], 0, False
+    while proc.poll() is None and not eof:
         with contextlib.suppress(Exception):
             select.select([fd], [], [], 1.0)
         total, eof = _read_stderr(fd, chunks, total)
-        if eof or proc.poll() is not None:
-            total, _eof = _read_stderr(fd, chunks, total)
+    while not eof:
+        total, eof = _read_stderr(fd, chunks, total)
+        if eof:
             break
+        with contextlib.suppress(Exception):
+            select.select([fd], [], [], 0.2)
     with contextlib.suppress(Exception):
         record["exit"] = proc.wait()
     record["phase"] = "exit"
@@ -309,6 +362,11 @@ def _follow(proc, fd, record, path):
             proc.stderr.close()
 
 def spawn_detached(argv=None, command=None, on_fail=None, action_id=""):
+    """Run argv (or a trusted Omarchy menu action string) detached through a
+    login shell. Returns an error string or None; a quick non-zero exit is
+    reported later through on_fail. Every attempt is appended to the action log.
+    The log path is captured here so a later PALLET_ACTION_LOG change does not
+    redirect the watcher."""
     env = launch_env()
     path = action_log_path()
     record = {"ts": time.time(), "id": action_id, "kind": "command" if command is not None else "argv",
@@ -351,6 +409,7 @@ class Host:
     def __init__(self, history=None):
         self.inbox = asyncio.Queue(); self.providers = []; self.merge_task = None; self.latest_qid = None
         self.history = history if history is not None else History(enabled=False)
+        # True while the client's stdin is open; enables late straggler emits.
         self.listening = False
     def on_provider_reply(self, name, msg):
         reply = {"id": msg.get("id", ""), "executed": msg.get("executed") is True, "provider": name}
@@ -383,6 +442,7 @@ class Host:
         self.latest_qid = None
         self.merge_task = None
     async def on_warm(self, msg):
+        # The overlay opened: let providers refresh caches before the first key.
         await self.send_to(None, {"id": "", "op": "warm"})
     async def on_execute(self, msg):
         wanted = str(msg.get("provider", ""))
@@ -396,10 +456,12 @@ class Host:
     async def on_record(self, msg):
         self.history.record(msg.get("provider"), str(msg.get("result", "")), str(msg.get("title", "")))
     async def on_launch(self, msg):
+        """Launch argv, or a menu action string (`command`), on the frontend's
+        behalf so failures are reported, including a quick non-zero exit."""
         aid = msg.get("id", "")
         loop = asyncio.get_running_loop()
         def failed(error):
-            with contextlib.suppress(RuntimeError):
+            with contextlib.suppress(RuntimeError):  # loop already closed at shutdown
                 loop.call_soon_threadsafe(self.emit, {"id": aid, "executed": False, "error": error})
         if "command" in msg:
             call = lambda: spawn_detached(command=msg.get("command"), on_fail=failed, action_id=aid)
@@ -420,6 +482,7 @@ class Host:
         dirty = False
         emitted_final = False
         next_emit = started + EARLY_EMIT_S
+
         def snapshot(final):
             merged = []
             for name in order:
@@ -428,6 +491,7 @@ class Host:
                    "pending": sorted(pending), "unresolved": sorted(pending | failed) if final else [],
                    "failed": sorted(failed)}
             return msg
+
         while True:
             now = time.monotonic()
             if not pending:
@@ -455,6 +519,7 @@ class Host:
             by_provider[name] = rows
             if msg.get("partial") is not True: pending.discard(name)
             if emitted_final:
+                # A straggler after the deadline: refresh the final view.
                 self.emit(snapshot(True))
             else:
                 dirty = True
@@ -497,7 +562,8 @@ async def amain():
     log(f"providers up: {[p.name for p in host.providers if p.alive] or 'none'}")
     try:
         await read_client(host)
-
+        # A pipe closes stdin immediately after its last request. Let that
+        # search finish within the existing merge budget before shutdown.
         if host.merge_task is not None:
             with contextlib.suppress(asyncio.CancelledError):
                 await host.merge_task

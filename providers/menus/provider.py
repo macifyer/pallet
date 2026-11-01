@@ -1,4 +1,30 @@
 #!/usr/bin/env python3
+"""Search and invoke menu items of the focused application, over AT-SPI.
+
+Adapted from MaNi4's omarchy-search-menu-items (MIT License):
+https://github.com/MaNi4/omarchy-search-menu-items
+
+Scope of this port: the menu-bar walk — finding the frame, fetching the
+tree a level at a time, collecting items, invoking DoAction. Deliberately
+deferred: the button fallback, the org.gtk.Actions export, multi-frame
+title disambiguation, and the Chromium accessibility-flag prompter.
+
+The focused app resolves from Hyprland (hyprctl activewindow -j).
+
+Latency model (cache-first, never blocking stdin):
+- Walks run on one worker thread with a total time budget (WALK_BUDGET).
+- A search for a window with a cached tree answers immediately from the
+  cache; a cache older than CACHE_TTL is re-walked in the background
+  (stale-while-revalidate).
+- A search for a window with no cache queues a walk and answers when it
+  finishes, unless the query was cancelled or superseded first.
+- The host's `warm` op (overlay opened) starts the walk before the first
+  keystroke, so the cache is usually ready by the time you type.
+- Without python-gobject or an accessibility bus the provider stays up and
+  answers every search with no results instead of crashing.
+
+Requires: python-gobject (gi), hyprctl in PATH, AT-SPI enabled.
+"""
 
 from __future__ import annotations
 
@@ -14,9 +40,9 @@ from dataclasses import dataclass, field
 from functools import partial
 from typing import Callable, NamedTuple
 
-try:
+try:  # Optional: without gi the provider answers with no results.
     from gi.repository import Gio, GLib
-except Exception:
+except Exception:  # ImportError, ValueError (namespace version), ...
     Gio = GLib = None
 
 ACCESSIBLE = "org.a11y.atspi.Accessible"
@@ -24,18 +50,19 @@ ACTION = "org.a11y.atspi.Action"
 APPLICATION = "org.a11y.atspi.Application"
 PROPERTIES = "org.freedesktop.DBus.Properties"
 
+# AT-SPI role and state numbers (atspi-constants.h).
 MENU, MENU_BAR, POPUP_MENU = 33, 34, 41
-ITEM_ROLES = {8, 35, 45}
-CONTENT_ROLES = {60, 82, 92, 93, 94, 95, 96}
+ITEM_ROLES = {8, 35, 45}  # check menu item, menu item, radio menu item
+CONTENT_ROLES = {60, 82, 92, 93, 94, 95, 96}  # terminal and document roles
 ACTIVE, CHECKED, ENABLED, SENSITIVE = 1, 4, 8, 24
 
 MAX_DEPTH = 12
 MAX_NODES = 6000
-WALK_BUDGET = 1.2
-CALL_TIMEOUT = 800
-CACHE_TTL = 8.0
-CACHE_MAX = 16
-FOCUS_TTL = 0.75
+WALK_BUDGET = 1.2  # seconds for a whole walk (frame search + menu tree)
+CALL_TIMEOUT = 800  # milliseconds per batched round
+CACHE_TTL = 8.0  # seconds before a cached tree is re-walked in the background
+CACHE_MAX = 16  # windows kept
+FOCUS_TTL = 0.75  # seconds a hyprctl focus lookup is reused
 MAX_RESULTS = 12
 
 EXPECTED_ERRORS = {
@@ -55,12 +82,16 @@ MODIFIERS = {
 }
 MODIFIER_ORDER = ["Super", "Meta", "Ctrl", "Alt", "Shift"]
 
+
 class Ref(NamedTuple):
+    """Where an object lives on the accessibility bus."""
     bus: str
     path: str
 
+
 DBUS = Ref("org.freedesktop.DBus", "/org/freedesktop/DBus")
 REGISTRY = Ref("org.a11y.atspi.Registry", "/org/a11y/atspi/accessible/root")
+
 
 @dataclass
 class Node:
@@ -70,14 +101,18 @@ class Node:
     name: str = ""
     key: str = ""
     actions: int = 0
+
     def has(self, state: int) -> bool:
         return bool(self.state >> state & 1)
+
     @property
     def label(self) -> str:
         return clean(self.name)
+
     @property
     def usable(self) -> bool:
         return self.actions > 0 and (self.has(ENABLED) or self.has(SENSITIVE))
+
 
 @dataclass
 class Item:
@@ -88,24 +123,30 @@ class Item:
     checked: bool
     ref: Ref
 
+
 def clean(text: str) -> str:
     text = " ".join((text or "").replace("\t", " ").split())
     return text if len(text) <= 70 else text[:69].rstrip() + "\u2026"
 
+
 def shortcut(binding: str) -> str:
+    """'Ctrl+Shift+S' from the toolkit's spelling: GTK gives
+    'mnemonic;path;accelerator', Qt the accelerator alone."""
     binding = binding or ""
     accelerator = binding.split(";")[-1]
+    # A bare Alt+letter is an in-menu mnemonic, not a real shortcut.
     if not accelerator or (";" not in binding and re.fullmatch(r"Alt\+.", accelerator)):
         return ""
     for token, name in MODIFIERS.items():
         accelerator = accelerator.replace(token, name)
-    if accelerator.endswith("+"):
+    if accelerator.endswith("+"):  # the key is "+" itself
         held = [part for part in accelerator[:-1].split("+") if part]
         key = "+"
     else:
         *held, key = accelerator.split("+")
     held.sort(key=lambda n: MODIFIER_ORDER.index(n) if n in MODIFIER_ORDER else len(MODIFIER_ORDER))
     return "+".join(held + [key.upper() if len(key) == 1 else key.capitalize()])
+
 
 def focused_window() -> dict | None:
     try:
@@ -120,16 +161,20 @@ def focused_window() -> dict | None:
         pass
     return None
 
+
 class Batch:
+    """Sends many calls on one connection and waits for all answers."""
 
     def __init__(self, connection, timeout: int = CALL_TIMEOUT):
         self.connection = connection
         self.timeout = timeout
         self.loop = GLib.MainLoop()
         self.pending = 0
+
     def call(self, ref: Ref, interface: str, method: str, arguments,
              done: Callable[[tuple | None], None]) -> None:
         self.pending += 1
+
         def finished(connection, result):
             try:
                 reply = connection.call_finish(result).unpack()
@@ -142,13 +187,16 @@ class Batch:
             self.pending -= 1
             if self.pending == 0:
                 self.loop.quit()
+
         self.connection.call(
             ref.bus, ref.path, interface, method, arguments, None,
             Gio.DBusCallFlags.NONE, self.timeout, None, finished,
         )
+
     def wait(self) -> None:
         if self.pending:
             self.loop.run()
+
 
 def accessibility_bus(session):
     address = session.call_sync(
@@ -161,10 +209,13 @@ def accessibility_bus(session):
         None, None,
     )
 
+
 class Tree:
+    """The accessibility tree of one app, fetched a level at a time."""
 
     def __init__(self, batch: Batch):
         self.batch = batch
+
     def fetch(self, refs: list[Ref], *, children: bool = False, role: bool = False,
               state: bool = False, name: bool = False, actions: bool = False) -> dict[Ref, Node]:
         nodes = {ref: Node() for ref in refs}
@@ -184,22 +235,27 @@ class Tree:
         self.batch.wait()
         return nodes
 
+
 def _set_children(node: Node, reply: tuple | None) -> None:
     if reply is not None:
         node.children = [Ref(*child) for child in reply[0]]
 
+
 def _set_role(node: Node, reply: tuple | None) -> None:
     if reply is not None:
         node.role = reply[0]
+
 
 def _set_state(node: Node, reply: tuple | None) -> None:
     if reply is not None:
         low, high = reply[0]
         node.state = low | high << 32
 
+
 def _set_name(node: Node, reply: tuple | None) -> None:
     if reply is not None:
         node.name = reply[0]
+
 
 def _set_actions(node: Node, reply: tuple | None) -> None:
     if reply is not None:
@@ -208,18 +264,24 @@ def _set_actions(node: Node, reply: tuple | None) -> None:
         if entries and not node.key:
             node.key = entries[0][2]
 
+
 def owners(batch: Batch, names: list[str], pid: int) -> list[str]:
+    """The bus names that belong to the process."""
     owned: list[str] = []
+
     def keep(name: str, reply: tuple | None) -> None:
         if reply and reply[0] == pid:
             owned.append(name)
+
     for name in names:
         batch.call(DBUS, DBUS.bus, "GetConnectionUnixProcessID",
                    GLib.Variant("(s)", (name,)), partial(keep, name))
     batch.wait()
     return owned
 
+
 def app_frames(batch: Batch, pid: int) -> tuple[dict[Ref, Node], dict[Ref, Node]]:
+    """The root node map and this app's windows."""
     tree = Tree(batch)
     apps = tree.fetch([REGISTRY], children=True)[REGISTRY].children
     by_bus = {ref.bus: ref for ref in apps}
@@ -227,12 +289,14 @@ def app_frames(batch: Batch, pid: int) -> tuple[dict[Ref, Node], dict[Ref, Node]
     frames = [frame for node in tree.fetch(own, children=True).values() for frame in node.children]
     return tree.fetch(frames, children=True, role=True, state=True, name=True), frames
 
+
 def choose_frame(frames: dict[Ref, Node], title: str) -> Ref | None:
     active = [ref for ref, node in frames.items() if node.has(ACTIVE)]
     if active:
         return active[0]
     titled = [ref for ref, node in frames.items() if title and node.name == title]
     return titled[0] if titled else (next(iter(frames), None))
+
 
 def find_menubar(tree: Tree, frame: Ref, root_node: Node, deadline: float) -> Ref | None:
     level = [(frame, root_node)]
@@ -248,6 +312,7 @@ def find_menubar(tree: Tree, frame: Ref, root_node: Node, deadline: float) -> Re
         level = list(tree.fetch(below[:MAX_NODES], children=True, role=True).items())
     return None
 
+
 def menu_items(nodes: dict[Ref, Node], menu: Ref, path: tuple[str, ...] = ()):
     for child in nodes[menu].children:
         node = nodes.get(child)
@@ -260,6 +325,7 @@ def menu_items(nodes: dict[Ref, Node], menu: Ref, path: tuple[str, ...] = ()):
                 yield from menu_items(nodes, child, path + (node.label,))
         elif node.role in ITEM_ROLES and node.label:
             yield list(path), child, node
+
 
 def collect_items(tree: Tree, menubar: Ref, deadline: float) -> list[Item]:
     nodes = tree.fetch([menubar], children=True)
@@ -275,6 +341,7 @@ def collect_items(tree: Tree, menubar: Ref, deadline: float) -> list[Item]:
         for path, ref, node in menu_items(nodes, menubar)
     ]
 
+
 def walk_items(a11y, pid: int, title: str) -> list[Item]:
     deadline = time.monotonic() + WALK_BUDGET
     batch = Batch(a11y)
@@ -288,13 +355,17 @@ def walk_items(a11y, pid: int, title: str) -> list[Item]:
         return []
     return collect_items(tree, menubar, deadline)
 
+
 def press(a11y, ref: Ref) -> None:
     a11y.call_sync(
         ref.bus, ref.path, ACTION, "DoAction",
         GLib.Variant("(i)", (0,)), None, Gio.DBusCallFlags.NONE, 2000, None,
     )
 
+
 def score(query: str, item: Item) -> float:
+    """Kept deliberately below the apps provider's range: menu items should
+    augment the list, not elbow their way past your apps."""
     label = item.label.lower()
     crumb = " ".join(item.path).lower()
     if label.startswith(query):
@@ -307,12 +378,15 @@ def score(query: str, item: Item) -> float:
         return 0.33
     return 0.0
 
+
 def log(*args: object) -> None:
     print("menus:", *args, file=sys.stderr, flush=True)
+
 
 def item_id(address: str, item: Item) -> str:
     digest = hashlib.sha1("\u0000".join([address, *item.path, item.label]).encode()).hexdigest()[:12]
     return f"menus:{digest}"
+
 
 def results_for(query: str, address: str, items: list[Item]) -> list[dict]:
     scored = [(score(query, item), i, item) for i, item in enumerate(items)]
@@ -325,14 +399,21 @@ def results_for(query: str, address: str, items: list[Item]) -> list[dict]:
             "icon": "system-run",
             "score": s,
             "provider": "menus",
-
+            # The action names the item by path + label so a re-walk between
+            # search and Enter can never press a different item.
             "actions": [{"type": "custom", "kind": "press", "id": i, "window": address,
                          "path": list(item.path), "label": item.label}] if item.enabled else [],
         }
         for s, i, item in scored
     ]
 
+
 class MenuService:
+    """Cache-first menu search with walks on a worker thread.
+
+    `walker(window) -> list[Item]` and `focus() -> dict | None` are injected
+    so the scheduling logic is testable without AT-SPI.
+    """
 
     def __init__(self, walker, focus, send, pressor=None):
         self.walker, self.focus_lookup, self.send, self.pressor = walker, focus, send, pressor
@@ -340,16 +421,18 @@ class MenuService:
         self.lock = threading.Lock()
         self.jobs: "queue.Queue[dict | None]" = queue.Queue()
         self.walking: set[str] = set()
-        self.waiting: dict[str, tuple[str, str]] = {}
+        self.waiting: dict[str, tuple[str, str]] = {}  # qid -> (address, query)
         self.focus_cache: tuple[float, dict | None] = (0.0, None)
         self.worker = threading.Thread(target=self._work, name="menus-walk", daemon=True)
         self.worker.start()
+
     def focus(self, fresh: bool = False) -> dict | None:
         at, window = self.focus_cache
         if fresh or time.monotonic() - at > FOCUS_TTL:
             window = self.focus_lookup()
             self.focus_cache = (time.monotonic(), window)
         return window
+
     def schedule(self, window: dict) -> None:
         address = str(window.get("address", ""))
         with self.lock:
@@ -357,6 +440,7 @@ class MenuService:
                 return
             self.walking.add(address)
         self.jobs.put(window)
+
     def _work(self) -> None:
         while True:
             window = self.jobs.get()
@@ -365,7 +449,7 @@ class MenuService:
             address = str(window.get("address", ""))
             try:
                 items = self.walker(window)
-            except Exception as err:
+            except Exception as err:  # never let one app kill the worker
                 log(f"walk failed: {err}")
                 items = None
             with self.lock:
@@ -381,6 +465,7 @@ class MenuService:
                 cached = self.cache.get(address)
             for qid, q in ready:
                 self.send({"id": qid, "results": results_for(q, address, cached["items"]) if cached else []})
+
     def warm(self) -> None:
         window = self.focus(fresh=True)
         if window is None:
@@ -388,6 +473,7 @@ class MenuService:
         cached = self.cache.get(str(window.get("address", "")))
         if cached is None or time.monotonic() - cached["at"] > CACHE_TTL:
             self.schedule(window)
+
     def search(self, qid: str, query: str) -> None:
         query = query.strip().lower()
         window = self.focus()
@@ -397,6 +483,7 @@ class MenuService:
         with self.lock:
             cached = self.cache.get(address)
             if cached is None:
+                # Only the newest query waits for a walk.
                 self.waiting = {k: v for k, v in self.waiting.items() if v[0] != address}
                 self.waiting[qid] = (address, query)
         if cached is None:
@@ -405,10 +492,12 @@ class MenuService:
         self.send({"id": qid, "results": results_for(query, address, cached["items"])})
         if time.monotonic() - cached["at"] > CACHE_TTL:
             self.schedule(window)
+
     def cancel(self, target: str) -> None:
         with self.lock:
             self.waiting.pop(target, None)
         self.send({"id": target, "cancelled": True})
+
     def find(self, action: dict) -> Item | None:
         address = str(action.get("window", ""))
         with self.lock:
@@ -426,6 +515,7 @@ class MenuService:
             if item.label == label and item.path == path:
                 return item
         return None
+
     def execute(self, aid: str, action: dict) -> None:
         ok, error = False, ""
         window = self.focus(fresh=True)
@@ -449,13 +539,17 @@ class MenuService:
             reply["error"] = error
         self.send(reply)
 
+
 _out_lock = threading.Lock()
+
 
 def send(msg: dict) -> None:
     with _out_lock:
         print(json.dumps(msg), flush=True)
 
+
 def connect():
+    """The accessibility bus connection, or None (logged once)."""
     if Gio is None:
         log("python-gobject (gi) not available; menu search disabled")
         return None
@@ -464,6 +558,7 @@ def connect():
     except Exception as err:
         log(f"accessibility bus unavailable: {err}")
         return None
+
 
 def main() -> None:
     a11y = connect()
@@ -491,6 +586,7 @@ def main() -> None:
             service.execute(str(msg.get("id", "")), action if isinstance(action, dict) else {})
         elif op == "cancel":
             service.cancel(str(msg.get("target", "")))
+
 
 if __name__ == "__main__":
     main()

@@ -22,6 +22,10 @@ function accepts(state, message) {
         && message.id === state.activeId && Array.isArray(message.results);
 }
 
+// Bare query to re-rank the last answer against while `text` is in flight.
+// `sentQuery` is the query that answer was for and `sentBare` what the host
+// matched (scope prefix stripped). Returns null when the scope prefix
+// changed: the previous rows then cannot be re-ranked meaningfully.
 function localBare(text, sentQuery, sentBare) {
     const t = String(text || "").trim();
     const q = String(sentQuery || "");
@@ -33,6 +37,10 @@ function localBare(text, sentQuery, sentBare) {
     return t.startsWith(prefix) ? t.substring(prefix.length).trim() : null;
 }
 
+// Rows to rank for one host message. While a query is still streaming, rows
+// from the previous answer are kept for providers that have not replied yet,
+// so the list never loses them before the new answer lands (the caller
+// re-ranks them against the new query). The final message is authoritative.
 function carryOver(previous, results, pending, final) {
     if (final || !Array.isArray(previous) || !Array.isArray(pending) || pending.length === 0)
         return results;

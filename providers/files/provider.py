@@ -1,4 +1,23 @@
 #!/usr/bin/env python3
+"""Search files and directories under $HOME.
+
+The index is built in a background thread with fd when available (respects
+the provider's own exclude list verbatim), otherwise os.walk with the same
+names pruned. A cold build publishes chunks as it goes, so the first query
+answers immediately from what is indexed (marked partial, with one follow-up
+when the build completes). Stale indexes (INDEX_TTL_S) rebuild in the
+background while the old one keeps serving. No per-entry stat() at build time.
+
+Search: candidates come from a packed lowercase haystack per chunk (str.find),
+are narrowed incrementally while the user types forward, scored, reduced with
+a top-k heap, and only the top candidates are stat()ed for the recency nudge.
+
+The primary Enter action is context-aware: code/text files open in your
+editor ($VISUAL/$EDITOR, GUI editors direct, terminal editors via foot -e),
+markdown inside an Obsidian vault (any ancestor holding .obsidian/) opens in
+Obsidian, and everything else falls through to the xdg-open MIME default —
+which intentionally stays available afterwards for odd defaults.
+"""
 
 from __future__ import annotations
 
@@ -51,21 +70,33 @@ ICON_BY_SUFFIX: dict[str, str] = {
 def fd_available() -> bool:
     return shutil.which("fd") is not None
 
+
 PRUNE_PATHS = {p for p in PRUNE if "/" in p}
 
-def skipped(rel_parts: tuple[str, ...]) -> bool:
 
+def skipped(rel_parts: tuple[str, ...]) -> bool:
+    # Single names prune anywhere; multi-segment entries (".config/chromium")
+    # prune that path prefix (and any nested occurrence).
     if any(part in PRUNE for part in rel_parts):
         return True
     joined = "/".join(rel_parts)
     return any(joined == p or joined.startswith(p + "/") or ("/" + p + "/") in ("/" + joined + "/") for p in PRUNE_PATHS)
 
-CHUNK = 4096
-PUBLISH_EVERY_S = 0.05
-RECENCY_CANDIDATES = 48
+
+CHUNK = 4096            # entries per searchable chunk
+PUBLISH_EVERY_S = 0.05  # cold build: publish partial chunks this often
+RECENCY_CANDIDATES = 48 # stat() only this many best candidates per query
+
 
 class Chunk:
+    """A slice of the index packed into one lowercase haystack string.
+
+    Candidate generation is a C-speed `str.find` over the haystack; every
+    score tier requires the query as a substring of the lowercase relative
+    path, so nothing outside the hits can rank.
+    """
     __slots__ = ("rels", "lowers", "dirs", "starts", "hay")
+
     def __init__(self, rels: list[str], dirs: list[bool]):
         self.rels = rels
         self.lowers = [rel.lower() for rel in rels]
@@ -77,6 +108,7 @@ class Chunk:
             pos += len(rel) + 1
         self.starts = starts
         self.hay = "\n".join(self.lowers) + "\n"
+
     def hits(self, q: str):
         hay, starts, find = self.hay, self.starts, self.hay.find
         pos = find(q)
@@ -86,21 +118,26 @@ class Chunk:
             nxt = starts[i + 1] if i + 1 < len(starts) else len(hay)
             pos = find(q, nxt)
 
+
 class Index:
     def __init__(self):
         self.chunks: list[Chunk] = []
         self.complete = False
         self.version = 0
         self.built_at = 0.0
+
     def count(self) -> int:
         return sum(len(c.rels) for c in self.chunks)
+
 
 _index = Index()
 _lock = threading.Lock()
 _building = threading.Event()
-_on_complete = None
+_on_complete = None  # callback(Index) run on the builder thread
+
 
 def iter_fd():
+    """Yield (rel, is_dir) from fd: directories first, then files."""
     base = ["fd", "--hidden", "--color", "never", "--base-directory", str(HOME)]
     for name in sorted(PRUNE):
         base += ["--exclude", name]
@@ -126,6 +163,7 @@ def iter_fd():
             proc.kill() if proc.poll() is None else None
             proc.wait()
 
+
 def iter_walk():
     for dirpath, dirnames, filenames in os.walk(HOME):
         rel_dir = Path(dirpath).relative_to(HOME)
@@ -139,7 +177,11 @@ def iter_walk():
         for name in filenames:
             yield prefix + name, False
 
+
 def build_index(publish_partial: bool | None = None) -> Index:
+    """Build a fresh index. A cold build publishes chunks as they fill so
+    searches see partial results within milliseconds; a refresh keeps
+    serving the previous index and swaps atomically at the end."""
     global _index
     cold = not _index.complete if publish_partial is None else publish_partial
     fresh = Index()
@@ -178,6 +220,7 @@ def build_index(publish_partial: bool | None = None) -> Index:
         _index = fresh
     return fresh
 
+
 def _build_worker():
     try:
         built = build_index()
@@ -187,37 +230,47 @@ def _build_worker():
     finally:
         _building.clear()
 
+
 def start_build() -> bool:
+    """Start a background (re)build unless one is running."""
     if _building.is_set():
         return False
     _building.set()
     threading.Thread(target=_build_worker, name="files-index", daemon=True).start()
     return True
 
+
 def ensure_fresh() -> None:
+    """Never blocks: kicks a background rebuild when the index is stale."""
     if not _index.complete and not _building.is_set():
         start_build()
     elif _index.complete and time.time() - _index.built_at > INDEX_TTL_S:
         start_build()
+
 
 def icon_for(path: str, is_dir: bool) -> str:
     if is_dir:
         return "folder"
     return ICON_BY_SUFFIX.get(Path(path).suffix.lower(), "text-x-generic")
 
+
 def is_text_like(is_dir: bool, rel: str) -> bool:
     if is_dir:
         return False
     return ICON_BY_SUFFIX.get(Path(rel).suffix.lower(), "").startswith("text-")
 
-def terminal_here(directory: str) -> list[str]:
 
+def terminal_here(directory: str) -> list[str]:
+    # Omarchy's default terminal entry point (bin/omarchy-launch-terminal uses
+    # xdg-terminal-exec --dir); foot is the fallback from the base packages.
     if shutil.which("xdg-terminal-exec"):
         return ["xdg-terminal-exec", "--dir=" + directory]
     return ["foot", "--working-directory", directory]
 
-def editor_argv(path: str) -> list[str] | None:
 
+def editor_argv(path: str) -> list[str] | None:
+    # Omarchy's editor launcher honours Setup > Defaults > Editor
+    # (bin/omarchy-launch-editor).
     if shutil.which("omarchy-launch-editor"):
         return ["omarchy-launch-editor", path]
     explicit = os.environ.get("VISUAL") or os.environ.get("EDITOR") or ""
@@ -240,7 +293,9 @@ def editor_argv(path: str) -> list[str] | None:
             return ["foot", "-e", name, path]
     return None
 
+
 def in_obsidian_vault(parent: Path) -> bool:
+    """A markdown file belongs to Obsidian iff an ancestor holds .obsidian/."""
     cur = parent
     while True:
         if (cur / ".obsidian").is_dir():
@@ -249,13 +304,18 @@ def in_obsidian_vault(parent: Path) -> bool:
             return False
         cur = cur.parent
 
+
 def display_parent(rel: str) -> str:
     parent = str(Path(rel).parent)
     return "~/" + parent if parent != "." else "~/"
 
+
 WORD_BOUNDARY = frozenset("_-/. ")
 
+
 def base_score(query: str, rel_lower: str, is_dir: bool) -> float:
+    """Basename prefix 0.9 > word prefix anywhere in the path 0.78 >
+    basename substring 0.62 > path substring 0.45 (0 = no match)."""
     pos = rel_lower.find(query)
     if pos < 0:
         return 0.0
@@ -275,9 +335,11 @@ def base_score(query: str, rel_lower: str, is_dir: bool) -> float:
         base -= 0.03
     return base - 0.005 * (rel_lower.count("/") - 1)
 
+
 def recency_bonus(mtime: float) -> float:
     age_days = (time.time() - mtime) / 86400 if mtime else 365
     return 0.04 if age_days < 7 else (0.02 if age_days < 30 else 0.0)
+
 
 def score(query: str, rel_lower: str, is_dir: bool, mtime: float) -> float:
     base = base_score(query, rel_lower, is_dir)
@@ -285,17 +347,20 @@ def score(query: str, rel_lower: str, is_dir: bool, mtime: float) -> float:
         return 0.0
     return min(0.97, base + recency_bonus(mtime))
 
+
 def actions_for(rel: str, is_dir: bool) -> list[dict]:
     path = str(HOME / rel)
     parent_rel = str(Path(rel).parent)
     parent = str(HOME / parent_rel) if parent_rel != "." else str(HOME)
     mime_open: dict[str, Any] = {"type": "open", "title": "Open", "url": path}
+
     if is_dir:
         return [
             mime_open,
             {"type": "launch", "title": "Open terminal here", "argv": terminal_here(path)},
             {"type": "copy", "title": "Copy path", "text": path},
         ]
+
     actions: list[dict[str, Any]] = []
     suffix = Path(rel).suffix.lower()
     if suffix in MARKDOWN_SUFFIXES and in_obsidian_vault(Path(parent)) and shutil.which("obsidian"):
@@ -313,13 +378,19 @@ def actions_for(rel: str, is_dir: bool) -> list[dict]:
     ]
     return actions
 
+
+# Typing forward only narrows substring hits, so the previous query's
+# candidates are reused when the new query extends it on the same index.
 _last: dict[str, Any] = {"q": "", "version": -1, "cands": None}
 
+
 _search_lock = threading.Lock()
+
 
 def candidates(q: str) -> list[tuple[str, str, bool]]:
     with _search_lock:
         return _candidates(q)
+
 
 def _candidates(q: str) -> list[tuple[str, str, bool]]:
     with _lock:
@@ -336,6 +407,7 @@ def _candidates(q: str) -> list[tuple[str, str, bool]]:
             cands.extend((rels[i], lowers[i], dirs[i]) for i in chunk.hits(q))
     _last.update(q=q, version=version, cands=cands)
     return cands
+
 
 def search(query: str) -> list[dict]:
     q = query.strip().lower()
@@ -368,23 +440,29 @@ def search(query: str) -> list[dict]:
         })
     return out
 
+
 _out_lock = threading.Lock()
+
 
 def send(msg: dict) -> None:
     with _out_lock:
         print(json.dumps(msg), flush=True)
 
+
 def main() -> None:
     global _on_complete
-
+    # A query answered while the cold index was still filling gets one
+    # follow-up reply (same id) once the index completes, unless cancelled.
     waiting: dict[str, str] = {}
     waiting_lock = threading.Lock()
+
     def on_complete(_built: Index) -> None:
         with waiting_lock:
             pending = dict(waiting)
             waiting.clear()
         for qid, query in pending.items():
             send({"id": qid, "results": search(query)})
+
     _on_complete = on_complete
     start_build()
     for line in sys.stdin:
@@ -406,6 +484,7 @@ def main() -> None:
                 waiting[qid] = query
             send({"id": qid, "results": results, "partial": True})
             if _index.complete:
+                # The build finished while we searched; answer now.
                 with waiting_lock:
                     late = waiting.pop(qid, None)
                 if late is not None:
@@ -418,6 +497,7 @@ def main() -> None:
             ensure_fresh()
         elif op == "execute":
             send({"id": msg.get("id", ""), "executed": False})
+
 
 if __name__ == "__main__":
     main()

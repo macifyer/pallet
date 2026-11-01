@@ -29,11 +29,13 @@ class AppDiscoveryTests(unittest.TestCase):
         self.addCleanup(self.roots.stop)
         apps._apps = []
         apps._checked_at = float('-inf')
+
     def desktop(self, relative='demo.desktop', fields='', system=False):
         target = (self.system if system else self.user) / 'applications' / relative
         target.parent.mkdir(parents=True, exist_ok=True)
         target.write_text('[Desktop Entry]\nType=Application\nName=Demo\nExec=demo %U\n' + fields, encoding='utf-8')
         return target
+
     def test_stale_list_serves_while_background_refresh_runs(self):
         self.desktop()
         apps.ensure_fresh()
@@ -46,24 +48,28 @@ class AppDiscoveryTests(unittest.TestCase):
             gate.wait(2)
             return real()
         with patch.object(apps, 'load_apps', side_effect=slow):
-            self.assertEqual([r['title'] for r in apps.search('o')], ['Demo'])
+            self.assertEqual([r['title'] for r in apps.search('o')], ['Demo'])  # stale, not blocked
             gate.set()
             for _ in range(200):
                 if len(apps._apps) == 2:
                     break
                 __import__('time').sleep(0.01)
         self.assertEqual(sorted(a['name'] for a in apps._apps), ['Demo', 'Other'])
+
     def test_terminal_primary_action_uses_default_terminal_dispatcher(self):
         self.desktop(fields='Terminal=true\n')
         result = apps.search('demo')[0]
         self.assertEqual(result['actions'][0]['argv'], ['xdg-terminal-exec', '--', 'demo'])
         self.assertEqual(result['actions'][0]['title'], 'Open in terminal')
+
     def test_terminal_extra_action_is_also_wrapped(self):
         self.desktop(fields='Terminal=true\nActions=Extra;\n[Desktop Action Extra]\nName=Extra\nExec=other --flag\n')
         self.assertEqual(apps.search('demo')[0]['actions'][1]['argv'], ['xdg-terminal-exec', '--', 'other', '--flag'])
+
     def test_gui_action_stays_direct(self):
         self.desktop()
         self.assertEqual(apps.search('demo')[0]['actions'][0]['argv'], ['demo'])
+
     def test_terminal_fallback_and_missing_terminal(self):
         self.desktop(fields='Terminal=true\n')
         with patch.object(apps.shutil, 'which', side_effect=lambda x: '/fake/' + x if x in {'demo', 'foot'} else None):
@@ -72,33 +78,40 @@ class AppDiscoveryTests(unittest.TestCase):
             result = apps.search('demo')[0]
             self.assertEqual(result['actions'], [])
             self.assertIn('No terminal launcher', result['subtitle'])
+
     def test_user_override_and_hidden_override(self):
         self.desktop(fields='Hidden=true\n')
         self.desktop(system=True)
         self.assertEqual(apps.load_apps(), [])
+
     def test_nested_desktop_id_is_stable_across_rename(self):
         target = self.desktop('vendor/demo.desktop')
         first = apps.load_apps()[0]['desktop_id']
         target.write_text(target.read_text().replace('Name=Demo', 'Name=Renamed'), encoding='utf-8')
         self.assertEqual(first, 'vendor-demo.desktop')
         self.assertEqual(apps.load_apps()[0]['desktop_id'], first)
+
     def test_identical_names_have_distinct_result_ids(self):
         self.desktop('one.desktop')
         self.desktop('two.desktop')
         self.assertEqual(len({r['id'] for r in apps.search('demo')}), 2)
+
     def test_visibility_and_tryexec(self):
         for fields in ('NoDisplay=true\n', 'OnlyShowIn=GNOME;\n', 'NotShowIn=Hyprland;\n', 'TryExec=missing\n'):
             target = self.desktop(fields=fields)
             self.assertIsNone(apps.parse_desktop(target))
+
     def test_field_codes_and_quoted_arguments(self):
         self.assertEqual(apps.split_exec('demo "two words" %F %% %c %k %i', 'Name', 'icon', '/a.desktop'),
                          ['demo', 'two words', '%', 'Name', '/a.desktop', '--icon', 'icon'])
         self.assertEqual(apps.split_exec('demo %Z'), [])
         self.assertEqual(apps.split_exec('demo "unterminated'), [])
+
     def test_search_does_not_interpolate_shell_syntax(self):
         target = self.desktop()
         target.write_text(target.read_text().replace('Exec=demo %U', 'Exec=demo "$(touch nope)"'), encoding='utf-8')
         self.assertEqual(apps.search('demo')[0]['actions'][0]['argv'], ['demo', '$(touch nope)'])
+
     def test_refresh_after_in_place_edit_and_removal(self):
         target = self.desktop()
         self.assertEqual(apps.search('demo')[0]['title'], 'Demo')
@@ -108,6 +121,7 @@ class AppDiscoveryTests(unittest.TestCase):
         target.unlink()
         apps.ensure_fresh(force=True)
         self.assertEqual(apps.search('demo'), [])
+
     def test_real_xdg_roots_are_absolute_ordered_and_deduplicated(self):
         roots = self.real_dirs()
         self.assertEqual(roots[0], self.user / 'applications')

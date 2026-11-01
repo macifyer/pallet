@@ -1,5 +1,10 @@
 #!/usr/bin/env python3
+"""Explicit Obsidian intent routing; never infer note creation from search.
 
+The host supplies optional scope metadata. Generic launcher queries do not
+become Obsidian searches unless they name Obsidian or explicitly request a
+new note. No indexing, vault selection, or CLI readiness is claimed here.
+"""
 from __future__ import annotations
 import hashlib
 import json
@@ -8,9 +13,11 @@ import shutil
 import sys
 from urllib.parse import urlencode, quote
 
+
 def uri(action: str, **params: str) -> str:
     query = urlencode({k: v for k, v in params.items() if v}, quote_via=quote)
     return 'obsidian://' + action + ('?' + query if query else '')
+
 
 def row(key: str, title: str, subtitle: str, query: str, url: str = '', argv=None, confirm=False) -> dict:
     action = {'type': 'launch', 'title': title, 'argv': argv} if argv else {'type': 'open', 'title': title, 'url': url}
@@ -27,6 +34,7 @@ def row(key: str, title: str, subtitle: str, query: str, url: str = '', argv=Non
         'provider': 'obsidian', 'actions': actions,
     }
 
+
 def catalog(query: str) -> list[dict]:
     launch = ['obsidian'] if shutil.which('obsidian') else ['xdg-open', uri('choose-vault')]
     return [
@@ -37,6 +45,7 @@ def catalog(query: str) -> list[dict]:
         row('setup', 'Obsidian Setup Guide', 'URI registration instructions; not an in-palette setup screen', query, 'https://help.obsidian.md/uri'),
         row('cli-guide', 'Obsidian CLI Setup Guide', 'CLI documentation; executable presence does not prove CLI readiness', query, 'https://help.obsidian.md/cli'),
     ]
+
 
 def search(query: str, scope: str = '') -> list[dict]:
     original = query.strip()
@@ -75,6 +84,7 @@ def search(query: str, scope: str = '') -> list[dict]:
     key = 'search-' + hashlib.sha256(term.encode()).hexdigest()[:16]
     return [row(key, 'Search Obsidian' + (': ' + term if term else ''),
                 'Search inside Obsidian — no note will be created', original, uri('search', query=term))]
+
 
 def main() -> None:
     for line in sys.stdin:

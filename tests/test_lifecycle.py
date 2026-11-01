@@ -28,18 +28,23 @@ class LifecycleTests(unittest.IsolatedAsyncioTestCase):
         with patch.object(host_module, 'MERGE_TIMEOUT_S', 0.01):
             await host._merge('q1', {p.name for p in providers}, '', 'demo')
         return emitted[0]
+
     async def test_complete_merge_has_no_unresolved(self):
         message = await self.merge([FakeProvider('apps')], [('apps', {'id': 'q1', 'results': []})])
         self.assertEqual(message['unresolved'], [])
+
     async def test_slow_provider_is_reported(self):
         message = await self.merge([FakeProvider('slow')], [])
         self.assertEqual(message['unresolved'], ['slow'])
+
     async def test_unavailable_provider_is_reported(self):
         message = await self.merge([FakeProvider('dead', False)], [])
         self.assertEqual(message['unresolved'], ['dead'])
+
     async def test_stale_reply_does_not_count_as_current(self):
         message = await self.merge([FakeProvider('apps')], [('apps', {'id': 'old', 'results': []})])
         self.assertEqual(message['unresolved'], ['apps'])
+
     async def test_stale_cancel_cannot_cancel_new_query(self):
         host = host_module.Host()
         host.latest_qid = 'new'
@@ -55,6 +60,7 @@ class LifecycleTests(unittest.IsolatedAsyncioTestCase):
                 await host.merge_task
             except asyncio.CancelledError:
                 pass
+
     async def test_matching_cancel_clears_query(self):
         host = host_module.Host()
         provider = FakeProvider('apps')
@@ -74,6 +80,7 @@ class JavaScriptTests(unittest.TestCase):
         result = subprocess.run([shutil.which('node'), str(ROOT / 'tests/lifecycle.cjs')],
                                 cwd=ROOT, text=True, capture_output=True, timeout=10)
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+
     @unittest.skipUnless(shutil.which('node'), 'Node.js required for JavaScript ranking checks')
     def test_ranking_tiers_and_fallbacks(self):
         result = subprocess.run([shutil.which('node'), str(ROOT / 'tests/ranking.cjs')],

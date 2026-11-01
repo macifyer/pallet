@@ -2,24 +2,38 @@ import QtQuick
 import Quickshell
 import Quickshell.Io
 
+// Headless plugin service (kind: service): registers Pallet's hotkey in the
+// running Hyprland session without editing hyprland.conf, and re-asserts it
+// after every `hyprctl reload`, because Hyprland drops runtime bindings.
+//
+// Pattern after MaNi4's omarchy-search-menu-items (MIT): bindings are told
+// apart by description, so re-registration never duplicates and a user's
+// conflicting binding is never overwritten.
+
 Item {
     id: root
+
     readonly property string pluginId: "io.github.macifyer.pallet"
     readonly property string description: "Pallet command palette"
     readonly property string mods: "ALT"
-    readonly property int modmask: 8
+    readonly property int modmask: 8   // ALT in Hyprland's modmask
     readonly property string key: "SPACE"
-    readonly property int keycode: 65
+    readonly property int keycode: 65  // XKB keycode for space
     readonly property string summon: "omarchy-shell shell toggle " + pluginId
+
     property bool bound: false
+
     Component.onCompleted: {
         bindsReader.running = true;
         reloadWatcher.running = true;
     }
+
     Component.onDestruction: {
         if (root.bound)
             Quickshell.execDetached(["hyprctl", "keyword", "unbind", root.mods + ", " + root.key]);
     }
+
+    // Read existing binds, then register only if the combo is free.
     Process {
         id: bindsReader
         command: ["hyprctl", "binds", "-j"]
@@ -27,6 +41,10 @@ Item {
             onStreamFinished: root.planBinds(text)
         }
     }
+
+    // socket2 carries "configreloaded"; runtime binds must be re-asserted.
+    // Needs socat; without it the binding quietly vanishes on reload until
+    // the plugin is reloaded.
     Process {
         id: reloadWatcher
         command: ["sh", "-c", "socat -U - UNIX-CONNECT:$XDG_RUNTIME_DIR/hypr/$HYPRLAND_INSTANCE_SIGNATURE/.socket2.sock | while IFS= read -r line; do case \"$line\" in configreloaded*) echo reload;; esac; done"]
@@ -37,6 +55,7 @@ Item {
             }
         }
     }
+
     function planBinds(jsonText: string): void {
         let binds = [];
         try {
@@ -52,7 +71,7 @@ Item {
             if (!sameKey || !sameMods)
                 continue;
             if ((bind.description ?? "") === root.description) {
-                root.bound = true;
+                root.bound = true;  // already ours, nothing to do
                 return;
             }
             console.warn("pallet: ALT+SPACE is already bound to '"
