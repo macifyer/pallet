@@ -1,25 +1,34 @@
 ---
-title: Codebase Wiki — Overview
-description: Home page and navigation hub for this codebase wiki. Generated and refreshed by your agent.
-profile:
-source_commit:
-tags: [wiki, overview]
+title: Pallet codebase wiki
+description: Architecture, modules, flows and guides for Pallet.
+profile: internal/standard
+source_commit: 6805a5924a9d4b9ebbceaea497d843786e09e1c5
+tags:
+  - wiki
+  - overview
 ---
+# Pallet wiki
 
-# Overview
-
-The home page and navigation hub for this codebase's wiki. It is a stub until it is generated — ask your agent to "build the wiki" (optionally naming an audience and depth, e.g. "public, exhaustive"). The full generate/refresh procedure ships with this pack's skill.
-
-Once generated, this page carries: what the project is, a big-picture architecture diagram, and a navigation map linking every section below.
-
-## What this is
+Pallet is a keyboard-driven command palette for Omarchy on Quickshell. The [project README](../README.md) describes installation and user-facing scopes. The plugin entry points are declared in [manifest.json](../manifest.json).
 
 ## Architecture at a glance
 
+```mermaid
+flowchart LR
+  User --> Shell[QML shell]
+  Shell --> Host[Python host]
+  Host --> Providers[Provider processes]
+  Providers --> Desktop[Desktop services]
+  Host --> History[(History)]
+```
+
+The [system architecture](./architecture/system.md) explains these boundaries; the [search flow](./flows/search.md) and [action flow](./flows/execute.md) follow the main interactions.
+
 ## Navigation
 
-- Architecture — system boundaries, layers, subsystems
-- Modules — one page per package / module
-- Flows — key end-to-end sequences
-- Concepts — glossary of domain terms and core abstractions
-- Guides — task-oriented how / where-do-I-change-X walkthroughs
+- **Architecture:** [System](./architecture/system.md)
+- **Modules:** [shell](./modules/shell.md) · [host](./modules/host.md) · [apps](./modules/apps.md) · [defaults](./modules/defaults.md) · [files](./modules/files.md) · [menus](./modules/menus.md) · [obsidian](./modules/obsidian.md) · [omarchy](./modules/omarchy.md) · [plugins](./modules/plugins.md) · [run](./modules/run.md) · [system](./modules/system.md) · [windows](./modules/windows.md)
+- **Flows:** [search](./flows/search.md) · [execute](./flows/execute.md)
+- **Concepts:** [provider](./concepts/provider.md) · [scope](./concepts/scope.md) · [ranking](./concepts/ranking.md) · [confirmation](./concepts/confirmation.md)
+- **Guides:** [add-provider](./guides/add-provider.md) · [change-ranking](./guides/change-ranking.md)
+- **Existing reference:** [Provider protocol](../docs/PROVIDERS.md), [Pallet README](../README.md)
