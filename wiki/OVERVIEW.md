@@ -2,7 +2,7 @@
 title: Pallet codebase wiki
 description: Architecture, modules, flows and guides for Pallet.
 profile: internal/standard
-source_commit: 21b3a2efb2cbf17829796f3863cc69b440c955bb
+source_commit: ccefa4fc8671cb5d0e38fe8d595700cf5d7727fe
 tags:
   - wiki
   - overview
