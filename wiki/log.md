@@ -28,3 +28,9 @@ Append-only audit trail. Add one dated entry per generation or refresh run, reco
 - Coverage: login-shell launches, `shell` actions, Omarchy leaf vs submenu, action log. OpenKnowledge MCP was unavailable, so this refresh was written into the git wiki.
 - Pages: [Host](./modules/host.md), [Provider host](./architecture/provider-host.md), [Provider contract](./architecture/provider-contract.md), [Execute](./flows/execute.md), [Action](./concepts/action.md), [omarchy](./modules/omarchy.md), [system](./modules/system.md).
 
+## 2026-11-01: refresh
+
+- Profile: internal/standard
+- source_commit: 5753f3c (was ccefa4f)
+- Coverage: same pages. Narrative code comments removed; the action-log and native-submenu handoff notes stay. OpenKnowledge MCP was unavailable, so this note was written into the git wiki.
+- Pages: [Overview](./OVERVIEW.md).
