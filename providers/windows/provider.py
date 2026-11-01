@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Search and control live Hyprland windows."""
+
 from __future__ import annotations
 import json
 import re

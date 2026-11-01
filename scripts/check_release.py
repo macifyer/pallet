@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Validate the single release version; never updates files or creates tags."""
+
 import argparse
 import ast
 import json

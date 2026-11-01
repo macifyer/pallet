@@ -1,4 +1,4 @@
-"""Frecency history: record, decay, annotate, persistence, opt-out."""
+
 import asyncio
 import importlib.util
 import json
@@ -12,13 +12,11 @@ host_module = importlib.util.module_from_spec(SPEC)
 SPEC.loader.exec_module(host_module)
 History = host_module.History
 
-
 class HistoryTests(unittest.TestCase):
     def setUp(self):
         self.tmp = tempfile.TemporaryDirectory()
         self.addCleanup(self.tmp.cleanup)
         self.path = Path(self.tmp.name) / 'state' / 'history.json'
-
     def test_record_annotate_and_persist(self):
         h = History(self.path, enabled=True)
         for _ in range(3):
@@ -30,7 +28,6 @@ class HistoryTests(unittest.TestCase):
         self.assertNotIn('recent', rows[1])
         again = History(self.path, enabled=True)
         self.assertAlmostEqual(again.score('apps', 'apps:firefox.desktop'), h.score('apps', 'apps:firefox.desktop'), places=2)
-
     def test_decay_and_cap(self):
         h = History(self.path, enabled=True)
         h.record('apps', 'a', now=0)
@@ -40,13 +37,11 @@ class HistoryTests(unittest.TestCase):
         for _ in range(20):
             h.record('apps', 'a')
         self.assertLessEqual(h.score('apps', 'a'), 1.0)
-
     def test_run_commands_are_never_stored(self):
         h = History(self.path, enabled=True)
         h.record('run', 'run:rm -rf ~/x', 'Run: rm -rf ~/x')
         self.assertEqual(h.entries, {})
         self.assertFalse(self.path.exists())
-
     def test_disabled_and_corrupt_file(self):
         h = History(self.path, enabled=False)
         h.record('apps', 'a')
@@ -56,14 +51,12 @@ class HistoryTests(unittest.TestCase):
         self.assertEqual(History(self.path, enabled=True).entries, {})
         self.path.write_text(json.dumps({'apps\u0000a': 'nope', 'apps\u0000b': [2, 5]}), encoding='utf-8')
         self.assertEqual(list(History(self.path, enabled=True).entries), ['apps\u0000b'])
-
     def test_lru_cap(self):
         h = History(self.path, enabled=True)
         for i in range(host_module.HISTORY_MAX + 5):
             h.record('files', f'f{i}', now=i)
         self.assertEqual(len(h.entries), host_module.HISTORY_MAX)
         self.assertNotIn('files\u0000f0', h.entries)
-
 
 class HostRecordTests(unittest.IsolatedAsyncioTestCase):
     async def test_record_op_boosts_merged_rows(self):
@@ -80,7 +73,6 @@ class HostRecordTests(unittest.IsolatedAsyncioTestCase):
         rows = emitted[-1]['results']
         self.assertIn('recent', rows[0])
         self.assertNotIn('recent', rows[1])
-
 
 if __name__ == '__main__':
     unittest.main()

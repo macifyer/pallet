@@ -5,6 +5,66 @@ Release numbers come from the root manifest.json. This changelog starts with
 
 ## [Unreleased]
 
+## [0.10.1]
+
+Fix for Omarchy (`om:`) and system (`s:`) rows that listed fine but did
+nothing on Enter (for example `om: learn`, `om: keybindings`,
+`s: show time`, `s: battery`). Covered by tests; still to be confirmed in a
+native Omarchy session.
+
+### Fixed
+- Omarchy menu leaves now run the menu's own action string the way Omarchy's
+  menu does (`Menu.qml` `runAction` → `bash -lc <action>`), detached in their
+  own session so closing the palette never kills them. 0.10.0 routed every
+  leaf through `omarchy-menu summon <id>`, a second IPC hop launched with
+  Pallet's raw environment.
+- Submenus (`om: learn`, `om: install`, provider-filled `om: font`, …) open
+  that place in the real Omarchy menu with `omarchy-menu summon <id>`, the
+  same route the AUR/install rows use. Submenus with no children and no
+  provider are no longer listed.
+- Already-installed rows (`· ✓ installed`) used to silently copy their
+  command on Enter; they now open their parent submenu in the native menu.
+- Every host launch (`s:` rows, panels, apps) goes through a login shell like
+  Omarchy's own keybindings (`bash -lc 'exec "$@"'`, `Util.execArgv`), with
+  Omarchy's `bin` directories added to PATH and `OMARCHY_PATH` set when the
+  session did not export it. When Pallet's environment lacks them,
+  `omarchy-notification-time`, `omarchy-notification-battery` and
+  `omarchy-shell …` exit at once (for example "OMARCHY_PATH is not set") with
+  nothing on screen; this is the leading explanation for the dead `s:` rows
+  and is still to be confirmed in a native session.
+- A command the shell cannot find (exit 127/126 within 4 s) is now reported
+  as a failure notification instead of vanishing; the failure notification
+  itself is sent through a login shell so it can be found.
+- Shell panel rows (Tailscale, Weather, …) are listed only when that widget is
+  in your bar (`~/.config/omarchy/shell.json`); Omarchy opens bar-widget
+  panels only through a live widget, so other rows did nothing.
+
+### Diagnostics
+- Each host launch appends one JSON line to
+  `$XDG_STATE_HOME/pallet/actions.jsonl` (`PALLET_ACTION_LOG` overrides the
+  path; `PALLET_ACTION_LOG=0` disables it). The line records the command,
+  argv, the actual `bash -lc` exec, pid, exit code, a bounded stderr snippet
+  (4096 bytes), and an environment snapshot: values for `PATH`,
+  `OMARCHY_PATH`, `HOME`, `SHELL`, `USER`, `LOGNAME`, every `XDG_*` variable
+  and `HYPRLAND_INSTANCE_SIGNATURE`, plus the names of every other variable.
+  A missing command is logged with phase `reject` before spawn; a child still
+  running after 4 s is logged again when it exits. This log does not by
+  itself make rows succeed. A fresh Omarchy boot retest is still required.
+
+### Tests
+- `tests/test_action_rows.py`: every Omarchy menu row in every guard state
+  (unanswered, passing, installed) must run its own menu command whose
+  `omarchy-*` programs exist in Omarchy's `bin/`, or open an existing menu
+  route; every extra and `s:` row must use a real command, panel id, IPC
+  target and method. Fails on 0.10.0.
+- Host tests for login-shell launches, own session, `command` launches and
+  late not-found reports.
+
+### Roadmap
+- Long-term: a native, Raycast-style Pallet UI for Omarchy submenus and
+  pickers (drill down inside the palette instead of handing off to the
+  Omarchy menu). 0.10.1 deliberately hands off to the real menu.
+
 ## [0.10.0]
 
 Native-session verification on Omarchy is still pending for everything

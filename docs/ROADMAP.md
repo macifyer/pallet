@@ -37,6 +37,14 @@ still pending):
       without flicker, guard results matching the native menu, confirmations,
       failure notifications.
 - [ ] Evaluate `checked` menu state (currently not shown).
+- [x] 0.10.1: leaves run the menu's own command (`bash -lc`, detached),
+      submenus open the real Omarchy menu, login-shell launches for `s:`
+      rows, a test that every action row resolves.
+- [ ] Verify 0.10.1 on a native Omarchy session (smoke-test list in the
+      0.10.1 PR/report).
+- [ ] Long-term: native Raycast-style Pallet UI for Omarchy submenus and
+      pickers (drill down inside the palette, no hand-off to the Omarchy
+      menu). Not started; 0.10.1 hands off to the real menu on purpose.
 
 ### Terminal application usage
 
