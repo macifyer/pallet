@@ -20,18 +20,14 @@ class ReleaseTests(unittest.TestCase):
                 directory.mkdir(parents=True)
                 (directory / 'manifest.json').write_text(json.dumps({'version': provider_version}), encoding='utf-8')
             return release.validate(root, tag)
-
     def test_valid(self):
         self.assertEqual(self.validate(tag='v0.8.1'), [])
-
     def test_bad_formats(self):
         for version in ('v0.8.1', '0.8', '6.4', '00.8.1'):
             self.assertTrue(self.validate(version=version))
-
     def test_mismatches(self):
         self.assertTrue(self.validate(heading='0.6.4'))
         self.assertTrue(self.validate(tag='v0.8.0'))
-
     def test_bundled_provider_has_no_separate_version(self):
         self.assertTrue(self.validate(provider_version='0.6.4'))
 

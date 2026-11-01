@@ -1,11 +1,13 @@
-"""Host streaming, routing, and action-reply behavior."""
+
 import asyncio
+import contextlib
 import importlib.util
 import json
 from pathlib import Path
 import os
 import select
 import shutil
+import signal
 import subprocess
 import sys
 import tempfile
@@ -15,11 +17,10 @@ from unittest.mock import patch
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / 'tests'))
-from timing import budget  # noqa: E402
+from timing import budget
 SPEC = importlib.util.spec_from_file_location('streaming_host', ROOT / 'src/host.py')
 host_module = importlib.util.module_from_spec(SPEC)
 SPEC.loader.exec_module(host_module)
-
 
 class FakeProvider:
     def __init__(self, name, alive=True, min_query=0, scoped_only=False):
@@ -31,6 +32,11 @@ class FakeProvider:
     async def ensure_running(self):
         pass
 
+def _row(rows, action_id, phase):
+    for record in rows:
+        if record.get('id') == action_id and record.get('phase') == phase:
+            return record
+    return None
 
 def later(host, delay, name, message):
     async def put():
@@ -38,15 +44,18 @@ def later(host, delay, name, message):
         await host.inbox.put((name, message))
     return asyncio.create_task(put())
 
-
 class MergeStreamingTests(unittest.IsolatedAsyncioTestCase):
+    def setUp(self):
+
+        patcher = patch.dict(os.environ, {'PALLET_ACTION_LOG': '0'})
+        patcher.start()
+        self.addCleanup(patcher.stop)
     def make_host(self, *providers):
         host = host_module.Host()
         host.providers = list(providers)
         emitted = []
         host.emit = emitted.append
         return host, emitted
-
     async def test_fast_provider_emits_before_slow_one(self):
         host, emitted = self.make_host(FakeProvider('apps'), FakeProvider('menus'))
         later(host, 0.0, 'apps', {'id': 'q', 'results': [{'title': 'Firefox'}]})
@@ -61,9 +70,7 @@ class MergeStreamingTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual([r['title'] for r in first['results']], ['Firefox'])
         self.assertTrue(last['final'])
         self.assertEqual(last['unresolved'], [])
-        # Every message carries the full set so far, in provider order.
         self.assertEqual([r['provider'] for r in last['results']], ['apps', 'menus'])
-
     async def test_all_fast_providers_produce_one_final_message(self):
         host, emitted = self.make_host(FakeProvider('apps'), FakeProvider('system'))
         await host.inbox.put(('apps', {'id': 'q', 'results': []}))
@@ -71,7 +78,6 @@ class MergeStreamingTests(unittest.IsolatedAsyncioTestCase):
         await host._merge('q', {'apps', 'system'}, '', 'x')
         self.assertEqual(len(emitted), 1)
         self.assertTrue(emitted[0]['final'])
-
     async def test_partial_provider_replies_replace_earlier_rows(self):
         host, emitted = self.make_host(FakeProvider('files'))
         await host.inbox.put(('files', {'id': 'q', 'partial': True, 'results': [{'title': 'a'}]}))
@@ -82,7 +88,6 @@ class MergeStreamingTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(emitted[0]['pending'], ['files'])
         self.assertEqual([r['title'] for r in emitted[-1]['results']], ['a', 'b'])
         self.assertTrue(emitted[-1]['final'])
-
     async def test_straggler_after_deadline_refreshes_final_view(self):
         host, emitted = self.make_host(FakeProvider('apps'), FakeProvider('menus'))
         host.listening = True
@@ -94,7 +99,6 @@ class MergeStreamingTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(finals[0]['unresolved'], ['menus'])
         self.assertEqual(finals[-1]['unresolved'], [])
         self.assertEqual([r['title'] for r in finals[-1]['results']], ['A', 'M'])
-
     async def test_no_late_listening_after_client_eof(self):
         host, emitted = self.make_host(FakeProvider('menus'))
         host.listening = False
@@ -103,7 +107,6 @@ class MergeStreamingTests(unittest.IsolatedAsyncioTestCase):
             await host._merge('q', {'menus'}, '', 'x')
         self.assertLess(time.monotonic() - started, 1.0)
         self.assertEqual(len(emitted), 1)
-
     async def test_failed_providers_are_listed_separately(self):
         host, emitted = self.make_host(FakeProvider('apps'), FakeProvider('menus', alive=False))
         await host.inbox.put(('apps', {'id': 'q', 'results': []}))
@@ -111,7 +114,6 @@ class MergeStreamingTests(unittest.IsolatedAsyncioTestCase):
             await host._merge('q', {'apps', 'menus'}, '', 'x')
         self.assertEqual(emitted[-1]['failed'], ['menus'])
         self.assertEqual(emitted[-1]['unresolved'], ['menus'])
-
     async def test_routing_skips_short_and_scoped_only_providers(self):
         host, _ = self.make_host(FakeProvider('apps'), FakeProvider('files', min_query=3),
                                  FakeProvider('run', min_query=3), FakeProvider('secret', scoped_only=True))
@@ -119,19 +121,16 @@ class MergeStreamingTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(host.route('', 'fire'), {'apps', 'files', 'run'})
         self.assertEqual(host.route('files', 'f'), {'files'})
         self.assertEqual(host.route('secret', ''), {'secret'})
-
     async def test_execute_for_unknown_or_dead_provider_reports_failure(self):
         host, emitted = self.make_host(FakeProvider('menus', alive=False))
         await host.on_execute({'id': 'a1', 'provider': 'menus', 'action': {}})
         await host.on_execute({'id': 'a2', 'provider': 'nope', 'action': {}})
         self.assertEqual([m['executed'] for m in emitted], [False, False])
         self.assertIn('not running', emitted[0]['error'])
-
     async def test_provider_execute_reply_is_forwarded(self):
         host, emitted = self.make_host()
         host.on_provider_reply('windows', {'id': 'a1', 'executed': False, 'error': 'gone'})
         self.assertEqual(emitted, [{'id': 'a1', 'executed': False, 'provider': 'windows', 'error': 'gone'}])
-
     async def test_launch_reports_missing_command(self):
         host, emitted = self.make_host()
         await host.on_launch({'id': 'l1', 'argv': ['pallet-definitely-missing-command']})
@@ -139,10 +138,8 @@ class MergeStreamingTests(unittest.IsolatedAsyncioTestCase):
         await host.on_launch({'id': 'l3', 'argv': ['true']})
         self.assertEqual([m['executed'] for m in emitted], [False, False, True])
         self.assertIn('command not found', emitted[0]['error'])
-
     async def test_launch_runs_detached_through_a_login_shell(self):
-        # argv goes through bash -lc 'exec "$@"' (Omarchy's Util.execArgv);
-        # a menu action string through bash -lc <action> (Util.execDetached).
+
         with tempfile.TemporaryDirectory() as tmp:
             out = Path(tmp) / 'out'
             host, emitted = self.make_host()
@@ -155,7 +152,6 @@ class MergeStreamingTests(unittest.IsolatedAsyncioTestCase):
             pid, sid = Path(f'{out}.1').read_text().split()[1:3]
             self.assertEqual(pid, sid, 'launched command leads its own session (survives the palette)')
             self.assertEqual(Path(f'{out}.2').read_text().strip(), 'cmd bash')
-
     async def test_command_that_is_not_found_in_the_shell_is_reported(self):
         host, emitted = self.make_host()
         with patch.object(host_module, 'LAUNCH_WATCH_S', budget(5)):
@@ -168,7 +164,88 @@ class MergeStreamingTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn('command not found: pallet-definitely-missing-command', emitted[1]['error'])
         await host.on_launch({'id': 'l2', 'command': '   '})
         self.assertEqual(emitted[-1]['executed'], False)
+    async def _action_rows(self, path, predicate):
+        deadline = time.monotonic() + budget(5)
+        last = []
+        while time.monotonic() < deadline:
+            if path.exists():
+                last, torn = [], False
+                for line in path.read_text(encoding='utf-8').splitlines():
+                    if not line.strip():
+                        continue
+                    try:
+                        last.append(json.loads(line))
+                    except json.JSONDecodeError:
+                        torn = True
+                        break
+                if not torn and predicate(last):
+                    return last
+            await asyncio.sleep(0.05)
+        self.fail(f'action log predicate not met: {last}')
+    async def test_action_log_records_watch_exit_and_reject(self):
 
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / 'pallet' / 'actions.jsonl'
+            decoy = Path(tmp) / 'decoy.jsonl'
+            host, emitted = self.make_host()
+            with patch.dict(os.environ, {'PALLET_ACTION_LOG': str(path), 'PALLET_SECRET_TOKEN': 'super-secret',
+                                         'XDG_PALLET_TEST': 'xdg-value'}):
+                await host.on_launch({'id': 'sh1', 'command': 'echo PALLET_STDERR_MARKER >&2; exit 3'})
+                await host.on_launch({'id': 'av1', 'argv': ['true']})
+                await host.on_launch({'id': 'bad', 'argv': ['pallet-definitely-missing-argv']})
+                with patch.object(host_module, 'LAUNCH_WATCH_S', 0.25):
+                    await host.on_launch({'id': 'sl1', 'command': 'exec sleep 30'})
+                    os.environ['PALLET_ACTION_LOG'] = str(decoy)
+                    rows = await self._action_rows(path, lambda found: _row(found, 'sl1', 'watch') is not None
+                                                   and _row(found, 'sh1', 'watch') is not None
+                                                   and _row(found, 'av1', 'watch') is not None
+                                                   and _row(found, 'bad', 'reject') is not None)
+                sleep = _row(rows, 'sl1', 'watch')
+                self.assertTrue(sleep['running'])
+                self.assertIsNone(sleep['exit'])
+                pid = sleep['pid']
+                try:
+                    os.kill(pid, signal.SIGTERM)
+                    rows = await self._action_rows(path, lambda found: _row(found, 'sl1', 'exit') is not None)
+                finally:
+                    try:
+                        os.kill(pid, signal.SIGTERM)
+                    except ProcessLookupError:
+                        pass
+            self.assertFalse(decoy.exists())
+        shell, argv, rejected = _row(rows, 'sh1', 'watch'), _row(rows, 'av1', 'watch'), _row(rows, 'bad', 'reject')
+        exited = _row(rows, 'sl1', 'exit')
+        self.assertEqual(shell['exit'], 3)
+        self.assertFalse(shell['running'])
+        self.assertIn('PALLET_STDERR_MARKER', shell['stderr'])
+        self.assertEqual(shell['command'], 'echo PALLET_STDERR_MARKER >&2; exit 3')
+        self.assertEqual(shell['exec'], ['bash', '-lc', shell['command']])
+        self.assertIsInstance(shell['pid'], int)
+        self.assertEqual(shell['id'], 'sh1')
+        self.assertEqual(argv['exit'], 0)
+        self.assertFalse(argv['running'])
+        self.assertEqual(argv['argv'], ['true'])
+        self.assertEqual(argv['command'], 'true')
+        self.assertEqual(argv['exec'], ['bash', '-lc', 'exec "$@"', 'bash', 'true'])
+        self.assertEqual(argv['id'], 'av1')
+        self.assertEqual(rejected['error'], 'command not found: pallet-definitely-missing-argv')
+        self.assertNotIn('pid', rejected)
+        self.assertEqual(rejected['argv'], ['pallet-definitely-missing-argv'])
+        self.assertEqual(rejected['id'], 'bad')
+        self.assertLess(exited['exit'], 0)
+        self.assertFalse(exited['running'])
+        self.assertEqual(exited['pid'], pid)
+        self.assertEqual(exited['exec'], ['bash', '-lc', 'exec sleep 30'])
+        self.assertIsInstance(exited['stderr'], str)
+        for record in (shell, argv, rejected, sleep, exited):
+            env = record['env']
+            self.assertEqual(env['XDG_PALLET_TEST'], 'xdg-value')
+            self.assertIn('PATH', env)
+            self.assertIn('HYPRLAND_INSTANCE_SIGNATURE', env)
+            self.assertIn('PALLET_SECRET_TOKEN', env['keys'])
+            self.assertNotIn('super-secret', json.dumps(env))
+            self.assertLessEqual(len(record.get('stderr', '')), host_module.STDERR_CAP)
+        self.assertNotIn('sh1', [m['id'] for m in emitted if m.get('executed') is False])
     def test_launch_env_adds_omarchy_bin_and_path(self):
         with tempfile.TemporaryDirectory() as tmp:
             (Path(tmp) / 'bin').mkdir()
@@ -179,7 +256,6 @@ class MergeStreamingTests(unittest.IsolatedAsyncioTestCase):
             self.assertIn(str(Path(tmp) / 'bin'), env['PATH'].split(':'))
             self.assertEqual(env['PATH'].split(':')[0], '/usr/bin')
 
-
 class ScopeTests(unittest.TestCase):
     def test_new_scopes(self):
         self.assertEqual(host_module.split_scope('om: theme'), ('omarchy', 'theme'))
@@ -188,9 +264,7 @@ class ScopeTests(unittest.TestCase):
         self.assertEqual(host_module.split_scope('web: youtube cats'), ('defaults', 'youtube cats'))
         self.assertEqual(host_module.split_scope('nope: x'), ('', 'nope: x'))
 
-
 class EndToEndStreamingTest(unittest.TestCase):
-    """Real subprocess host with one fast and one slow provider over pipes."""
     def test_first_results_do_not_wait_for_slow_provider(self):
         fast = "import json,sys\nfor l in sys.stdin:\n m=json.loads(l)\n if m.get('op')=='search': print(json.dumps({'id':m['id'],'results':[{'title':'fast'}]}),flush=True)\n"
         slow = "import json,sys,time\nfor l in sys.stdin:\n m=json.loads(l)\n if m.get('op')=='search':\n  time.sleep(0.4); print(json.dumps({'id':m['id'],'results':[{'title':'slow'}]}),flush=True)\n"
@@ -205,9 +279,7 @@ class EndToEndStreamingTest(unittest.TestCase):
                 (d / 'manifest.json').write_text(json.dumps({'name': name, 'exec': [sys.executable, str(d / 'w.py')]}))
             proc = subprocess.Popen([sys.executable, str(root / 'src/host.py')], stdin=subprocess.PIPE,
                                     stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, text=True)
-
             def run(qid):
-                """Send one search; return [(seconds, msg)] up to the first message with both rows."""
                 start = time.monotonic()
                 proc.stdin.write(json.dumps({'id': qid, 'op': 'search', 'query': 'x'}) + '\n'); proc.stdin.flush()
                 stamps = []
@@ -221,16 +293,14 @@ class EndToEndStreamingTest(unittest.TestCase):
                     if 'slow' in [r['title'] for r in msg['results']]:
                         return stamps
             try:
-                # Warm-up: wait until both providers are up and have answered
-                # once, so start-up cost is not measured as streaming latency.
+
                 run('q0')
                 stamps = run('q1')
             finally:
                 proc.stdin.close(); proc.wait(timeout=budget(5)); proc.stdout.close()
         first_t, first = stamps[0]
         slow_t, last = stamps[-1]
-        # The first emit carries only the fast row, is not final, and arrives
-        # before the slow provider's reply: it did not wait for it.
+
         self.assertEqual([r['title'] for r in first['results']], ['fast'])
         self.assertIs(first['final'], False)
         self.assertEqual(first['pending'], ['slow'])
@@ -238,7 +308,6 @@ class EndToEndStreamingTest(unittest.TestCase):
         self.assertLess(first_t, budget(0.3))
         self.assertEqual([r['title'] for r in last['results']], ['fast', 'slow'])
         self.assertIs(last['final'], True)
-
 
 if __name__ == '__main__':
     unittest.main()

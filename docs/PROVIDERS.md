@@ -76,6 +76,12 @@ Client to host (besides `search`/`cancel`/`execute`/`warm`):
 - `open` — path or url via xdg-open (frontend)
 - `custom` — provider-defined payload sent back to the owning provider
 
+`launch` and `shell` are appended to `$XDG_STATE_HOME/pallet/actions.jsonl`
+(one JSON object per launch; `PALLET_ACTION_LOG` overrides the path and
+`PALLET_ACTION_LOG=0` disables it). The line has the command, argv, the
+`bash -lc` exec, pid, exit code, a short stderr snippet, and an environment
+snapshot. Reading it does not make a row succeed.
+
 ## Action metadata
 
 ```json

@@ -1,7 +1,6 @@
 import json
 import sys
 
-
 def search(query: str) -> list[dict]:
     return [
         {
@@ -14,7 +13,6 @@ def search(query: str) -> list[dict]:
         }
     ]
 
-
 def main() -> None:
     for line in sys.stdin:
         msg = json.loads(line)
@@ -23,9 +21,7 @@ def main() -> None:
         elif msg.get("op") == "cancel":
             print(json.dumps({"id": msg.get("target"), "cancelled": True}), flush=True)
         elif msg.get("op") == "execute":
-            # Providers that return custom actions handle them here.
             print(json.dumps({"id": msg.get("id"), "executed": True}), flush=True)
-
 
 if __name__ == "__main__":
     main()

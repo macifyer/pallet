@@ -1,24 +1,11 @@
 #!/usr/bin/env python3
-"""Pallet core host: fans a query out to providers and streams merged results.
 
-Scope prefixes (`files:`/`f:`, `obsidian:`/`o:`, `apps:`/`a:`, `omarchy:`/`om:`,
-`system:`/`sys:`, `windows:`/`w:`, `menus:`/`m:`, `plugins:`/`p:`, `run:`,
-`web:`) focus one provider. The prefix is stripped before providers see it;
-responses echo `scope` and `bare` so UI ranking matches what providers matched.
-
-Streaming contract (backwards compatible): every message for a query carries
-the *complete* merged result set so far, so a consumer that only keeps the
-last message per id still sees everything. Early messages carry
-`"final": false` and list the providers still `pending`; the final message has
-`"final": true` and lists `unresolved` providers (timed out or failed). A
-provider that answers after the deadline produces one more final message with
-the late results while its query is still current.
-"""
 from __future__ import annotations
 import asyncio
 import contextlib
 import json
 import os
+import select
 import shutil
 import subprocess
 import sys
@@ -27,19 +14,16 @@ import time
 from pathlib import Path
 ROOT = Path(__file__).resolve().parent.parent
 PROVIDERS_DIR = ROOT / "providers"
-# Deadline for the final message (footer reports providers missing it).
+
 MERGE_TIMEOUT_S = 0.6
-# First partial emit waits this long after the request so near-simultaneous
-# replies land in one paint instead of several.
+
 EARLY_EMIT_S = 0.012
-# Later partial emits are coalesced to at most one per window.
+
 COALESCE_S = 0.03
-# After the final message, keep listening this long for stragglers (only while
-# the client is connected) so slow providers still show up instead of vanishing.
+
 LATE_GRACE_S = 2.5
 RESTART_BACKOFF_S = 30.0
-# Frecency: chosen results get a small `recent` boost (0..1) the frontend
-# folds into ranking *within* a match tier. Typed commands are never stored.
+
 HISTORY_MAX = 400
 HISTORY_HALF_LIFE_S = 14 * 86400
 HISTORY_SKIP = {"run"}
@@ -90,10 +74,6 @@ def history_path():
     return Path(base) / "pallet" / "history.json"
 
 class History:
-    """Per-result use counts with exponential decay, persisted as JSON.
-
-    Disabled with PALLET_HISTORY=0. Keys match the frontend's Fuzzy.keyOf:
-    provider + NUL + (id or title)."""
     def __init__(self, path=None, enabled=None):
         self.enabled = os.environ.get("PALLET_HISTORY", "1") != "0" if enabled is None else enabled
         self.path = path or history_path()
@@ -149,8 +129,7 @@ class Provider:
         spec = spec or {}
         self.name, self.argv, self.inbox, self.proc = name, argv, inbox, None
         self.on_reply = on_reply
-        # Routing hints from the manifest. `minQuery`: skip unscoped queries
-        # shorter than this. `scopedOnly`: only answer when explicitly scoped.
+
         self.min_query = _int(spec.get("minQuery"), 0)
         self.scoped_only = spec.get("scopedOnly") is True
         self.started_at = 0.0
@@ -167,7 +146,6 @@ class Provider:
         except OSError as err: log(f"{self.name}: failed to start: {err}"); self.proc = None; return
         asyncio.create_task(self._read_stdout(self.proc)); asyncio.create_task(self._read_stderr(self.proc))
     async def ensure_running(self):
-        """Restart a crashed provider at most once per backoff window."""
         if self.alive or time.monotonic() - self.started_at < RESTART_BACKOFF_S: return
         self.restarts += 1
         log(f"{self.name}: restarting (attempt {self.restarts})")
@@ -181,8 +159,7 @@ class Provider:
                 except json.JSONDecodeError: continue
                 if not isinstance(msg, dict): continue
                 if "executed" in msg and self.on_reply is not None:
-                    # Action replies go straight to the client; they never
-                    # belong to a search merge.
+
                     self.on_reply(self.name, msg); continue
                 await self.inbox.put((self.name, msg))
         except (ValueError, asyncio.LimitOverrunError) as err:
@@ -195,15 +172,15 @@ class Provider:
         try: self.proc.stdin.write(json.dumps(msg).encode()+b"\n"); await self.proc.stdin.drain()
         except (BrokenPipeError, ConnectionResetError): pass
 
-# Launches mirror how Omarchy itself runs commands (shell/Commons/Util.qml):
-# argv through `bash -lc 'exec "$@"'` (Util.execArgv) and menu action strings
-# through `bash -lc <action>` (Util.execDetached, what Menu.qml runAction does).
-# The login shell sources /etc/profile.d/omarchy.sh (default/bash/env-bootstrap),
-# so omarchy-* scripts get OMARCHY_PATH and PATH even when the shell process
-# that started this host has a thinner environment. Stdin/stdout are detached
-# and the child gets its own session, so closing the palette never kills it.
 LAUNCH_WATCH_S = 4.0
+STDERR_CAP = 4096
 _emit_lock = threading.Lock()
+_action_log_lock = threading.Lock()
+ENV_SNAPSHOT_KEYS = (
+    "PATH", "OMARCHY_PATH", "HOME", "SHELL", "USER", "LOGNAME",
+    "XDG_CONFIG_HOME", "XDG_DATA_HOME", "XDG_STATE_HOME", "XDG_RUNTIME_DIR",
+    "XDG_CURRENT_DESKTOP", "HYPRLAND_INSTANCE_SIGNATURE",
+)
 
 def omarchy_bin_dirs():
     roots = [os.environ.get("OMARCHY_PATH") or "", "/usr/share/omarchy",
@@ -215,8 +192,6 @@ def omarchy_bin_dirs():
     return out
 
 def launch_env():
-    """Environment for launched commands: PATH also covers Omarchy's bin dirs
-    (dev-linked or ~/.local/share installs) and OMARCHY_PATH is set if missing."""
     env = dict(os.environ)
     parts = [p for p in env.get("PATH", "").split(":") if p]
     for d in omarchy_bin_dirs() + [os.path.expanduser("~/.local/bin")]:
@@ -227,53 +202,155 @@ def launch_env():
             env["OMARCHY_PATH"] = os.path.dirname(d); break
     return env
 
-def _watch(proc, label, on_fail):
-    """Report a launch that dies quickly with a non-zero status; otherwise
-    just reap it. stderr is not captured: a pipe would kill long-running apps
-    with SIGPIPE once the host goes away, and a file would grow unbounded."""
-    code = None
-    with contextlib.suppress(Exception):
-        code = proc.wait(timeout=LAUNCH_WATCH_S)
-    if code is None:
-        with contextlib.suppress(Exception): proc.wait()
+def action_log_path():
+    # Unfinished: om:/s: rows still do not run in the Omarchy VM. Next agent: on a fresh boot, read this log (command, exit, stderr, PATH, OMARCHY_PATH) and fix the launch it shows dying.
+    override = os.environ.get("PALLET_ACTION_LOG")
+    if override == "0":
+        return None
+    if override:
+        return Path(override)
+    base = os.environ.get("XDG_STATE_HOME") or os.path.expanduser("~/.local/state")
+    return Path(base) / "pallet" / "actions.jsonl"
+
+def env_snapshot(env):
+    snap = {key: env.get(key, "") for key in ENV_SNAPSHOT_KEYS}
+    snap.update({key: env[key] for key in env if key.startswith("XDG_") and key not in snap})
+    snap["keys"] = sorted(env)
+    return snap
+
+def append_action_log(record, path):
+    if path is None:
         return
+    line = json.dumps(record, separators=(",", ":"), ensure_ascii=False)
+    try:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        with _action_log_lock:
+            with path.open("a", encoding="utf-8") as fh:
+                fh.write(line + "\n")
+    except OSError as err:
+        log(f"action log: {err}")
+
+def _stderr_text(chunks):
+    return b"".join(chunks).decode("utf-8", "replace")[:STDERR_CAP]
+
+def _read_stderr(fd, chunks, total):
+    eof = False
+    while True:
+        try:
+            data = os.read(fd, 65536)
+        except BlockingIOError:
+            return total, eof
+        except OSError:
+            return total, True
+        if not data:
+            return total, True
+        if total < STDERR_CAP:
+            take = data[:STDERR_CAP - total]
+            chunks.append(take)
+            total += len(take)
+
+def _watch(proc, record, on_fail, path):
+    fd = proc.stderr.fileno()
+    os.set_blocking(fd, False)
+    chunks, total = [], 0
+    deadline = time.monotonic() + LAUNCH_WATCH_S
+    code = None
+    while True:
+        total, eof = _read_stderr(fd, chunks, total)
+        code = proc.poll()
+        if code is not None:
+            total, _eof = _read_stderr(fd, chunks, total)
+            break
+        remaining = deadline - time.monotonic()
+        if remaining <= 0 or eof:
+            if eof:
+                with contextlib.suppress(subprocess.TimeoutExpired):
+                    code = proc.wait(timeout=max(0.0, remaining))
+            break
+        with contextlib.suppress(Exception):
+            select.select([fd], [], [], min(0.2, remaining))
+    record["stderr"] = _stderr_text(chunks)
+    record["phase"] = "watch"
+    record["exit"] = code
+    record["running"] = code is None
+    append_action_log(record, path)
+    if code is None:
+        threading.Thread(target=_follow, args=(proc, fd, dict(record), path), daemon=True).start()
+        return
+    label = record.get("label") or "command"
     if code in (126, 127):
-        # The shell could not find or run it: always worth a notification.
         msg = f"command not found: {label}" if code == 127 else f"cannot run: {label}"
         log(f"launch failed: {msg}")
         if on_fail is not None: on_fail(msg[:300])
     elif code:
-        # Pickers exit 1 on Esc, toggles report state: log only, no popup.
-        log(f"launch: {label} exited with status {code}")
+        log(f"launch: {record.get('label')} exited with status {code}")
+    if proc.stderr is not None:
+        with contextlib.suppress(Exception):
+            proc.stderr.close()
 
-def spawn_detached(argv=None, command=None, on_fail=None):
-    """Run argv (or a trusted Omarchy menu action string) detached through a
-    login shell. Returns an error string or None; a quick non-zero exit is
-    reported later through on_fail."""
+def _follow(proc, fd, record, path):
+    chunks, total = [], 0
+    while True:
+        with contextlib.suppress(Exception):
+            select.select([fd], [], [], 1.0)
+        total, eof = _read_stderr(fd, chunks, total)
+        if eof or proc.poll() is not None:
+            total, _eof = _read_stderr(fd, chunks, total)
+            break
+    with contextlib.suppress(Exception):
+        record["exit"] = proc.wait()
+    record["phase"] = "exit"
+    record["running"] = False
+    record["ts"] = time.time()
+    record["stderr"] = _stderr_text(chunks)
+    append_action_log(record, path)
+    if proc.stderr is not None:
+        with contextlib.suppress(Exception):
+            proc.stderr.close()
+
+def spawn_detached(argv=None, command=None, on_fail=None, action_id=""):
     env = launch_env()
+    path = action_log_path()
+    record = {"ts": time.time(), "id": action_id, "kind": "command" if command is not None else "argv",
+              "env": env_snapshot(env)}
     if command is not None:
         if not isinstance(command, str) or not command.strip():
+            record.update(phase="reject", error="invalid command", command=command if isinstance(command, str) else "")
+            append_action_log(record, path)
             return "invalid command"
         full, label = ["bash", "-lc", command], command.split(None, 1)[0]
+        record["command"] = command
     else:
         if not isinstance(argv, list) or not argv or not all(isinstance(a, str) and a for a in argv):
+            record.update(phase="reject", error="invalid command")
+            append_action_log(record, path)
             return "invalid command"
         if shutil.which(argv[0], path=env["PATH"]) is None:
-            return f"command not found: {argv[0]}"
+            err = f"command not found: {argv[0]}"
+            record.update(phase="reject", error=err, argv=argv, label=argv[0], command=argv[0])
+            append_action_log(record, path)
+            return err
         full, label = ["bash", "-lc", 'exec "$@"', "bash", *argv], argv[0]
+        record["argv"] = list(argv)
+        record["command"] = " ".join(argv)
+    record["label"] = label
+    record["exec"] = full
     try:
-        proc = subprocess.Popen(full, stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+        proc = subprocess.Popen(full, stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.PIPE,
                                 start_new_session=True, cwd=os.path.expanduser("~"), close_fds=True, env=env)
     except OSError as err:
-        return f"{label}: {err.strerror or err}"
-    threading.Thread(target=_watch, args=(proc, label, on_fail), daemon=True).start()
+        message = f"{label}: {err.strerror or err}"
+        record.update(phase="reject", error=message)
+        append_action_log(record, path)
+        return message
+    record["pid"] = proc.pid
+    threading.Thread(target=_watch, args=(proc, record, on_fail, path), daemon=True).start()
     return None
 
 class Host:
     def __init__(self, history=None):
         self.inbox = asyncio.Queue(); self.providers = []; self.merge_task = None; self.latest_qid = None
         self.history = history if history is not None else History(enabled=False)
-        # True while the client's stdin is open; enables late straggler emits.
         self.listening = False
     def on_provider_reply(self, name, msg):
         reply = {"id": msg.get("id", ""), "executed": msg.get("executed") is True, "provider": name}
@@ -306,7 +383,6 @@ class Host:
         self.latest_qid = None
         self.merge_task = None
     async def on_warm(self, msg):
-        # The overlay opened: let providers refresh caches before the first key.
         await self.send_to(None, {"id": "", "op": "warm"})
     async def on_execute(self, msg):
         wanted = str(msg.get("provider", ""))
@@ -320,17 +396,15 @@ class Host:
     async def on_record(self, msg):
         self.history.record(msg.get("provider"), str(msg.get("result", "")), str(msg.get("title", "")))
     async def on_launch(self, msg):
-        """Launch argv, or a menu action string (`command`), on the frontend's
-        behalf so failures are reported, including a quick non-zero exit."""
         aid = msg.get("id", "")
         loop = asyncio.get_running_loop()
         def failed(error):
-            with contextlib.suppress(RuntimeError):  # loop already closed at shutdown
+            with contextlib.suppress(RuntimeError):
                 loop.call_soon_threadsafe(self.emit, {"id": aid, "executed": False, "error": error})
         if "command" in msg:
-            call = lambda: spawn_detached(command=msg.get("command"), on_fail=failed)
+            call = lambda: spawn_detached(command=msg.get("command"), on_fail=failed, action_id=aid)
         else:
-            call = lambda: spawn_detached(msg.get("argv"), on_fail=failed)
+            call = lambda: spawn_detached(msg.get("argv"), on_fail=failed, action_id=aid)
         err = await loop.run_in_executor(None, call)
         reply = {"id": aid, "executed": err is None}
         if err: reply["error"] = err; log(f"launch failed: {err}")
@@ -346,7 +420,6 @@ class Host:
         dirty = False
         emitted_final = False
         next_emit = started + EARLY_EMIT_S
-
         def snapshot(final):
             merged = []
             for name in order:
@@ -355,7 +428,6 @@ class Host:
                    "pending": sorted(pending), "unresolved": sorted(pending | failed) if final else [],
                    "failed": sorted(failed)}
             return msg
-
         while True:
             now = time.monotonic()
             if not pending:
@@ -383,7 +455,6 @@ class Host:
             by_provider[name] = rows
             if msg.get("partial") is not True: pending.discard(name)
             if emitted_final:
-                # A straggler after the deadline: refresh the final view.
                 self.emit(snapshot(True))
             else:
                 dirty = True
@@ -426,8 +497,7 @@ async def amain():
     log(f"providers up: {[p.name for p in host.providers if p.alive] or 'none'}")
     try:
         await read_client(host)
-        # A pipe closes stdin immediately after its last request. Let that
-        # search finish within the existing merge budget before shutdown.
+
         if host.merge_task is not None:
             with contextlib.suppress(asyncio.CancelledError):
                 await host.merge_task

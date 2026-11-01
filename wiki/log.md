@@ -21,3 +21,10 @@ Append-only audit trail. Add one dated entry per generation or refresh run, reco
 - Coverage: added plugin shell, provider host, and provider contract pages; summon flow; result, action, and frecency concepts. Linked them from the overview, system page, and search and execute flows.
 - Pages: [Overview](./OVERVIEW.md), [Plugin shell](./architecture/plugin-shell.md), [Provider host](./architecture/provider-host.md), [Provider contract](./architecture/provider-contract.md), [System](./architecture/system.md), [Summon](./flows/summon.md), [Search](./flows/search.md), [Execute](./flows/execute.md), [Result](./concepts/result.md), [Action](./concepts/action.md), [Frecency](./concepts/frecency.md).
 
+## 2026-11-01: refresh
+
+- Profile: internal/standard
+- source_commit: the action-log commit on `fix-om-menu-actions` (was c8e65d3)
+- Coverage: login-shell launches, `shell` actions, Omarchy leaf vs submenu, action log. OpenKnowledge MCP was unavailable, so this refresh was written into the git wiki.
+- Pages: [Host](./modules/host.md), [Provider host](./architecture/provider-host.md), [Provider contract](./architecture/provider-contract.md), [Execute](./flows/execute.md), [Action](./concepts/action.md), [omarchy](./modules/omarchy.md), [system](./modules/system.md).
+

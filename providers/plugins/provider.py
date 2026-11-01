@@ -1,17 +1,5 @@
 #!/usr/bin/env python3
-"""Search and summon installed Omarchy shell plugins.
 
-The Quattro shell is a plugin host: every first-party panel/overlay and
-every third-party install declares itself in a manifest.json with an id,
-name, description, and kinds. This provider scans the third-party directory
-(~/.config/omarchy/plugins) plus known first-party locations, so results
-reflect the machine's actual setup: install a plugin and it becomes
-searchable in Pallet without any code change here.
-
-Results are summoned through the shell's documented CLI (the same IPC the
-native menu uses for image-picker/speedtest). Pallet itself is excluded --
-toggling the palette from inside the palette is a hall of mirrors.
-"""
 from __future__ import annotations
 import json
 import sys

@@ -45,7 +45,7 @@ const runSearch = method('runSearch');
 inputChanged();
 assert.equal(cancels, 1);
 assert.equal(resets, 1);
-// Nothing to re-rank yet: the rows already shown stay until the answer lands.
+
 assert.deepEqual(root.filtered, ['old']);
 assert.equal(root.panelOpen, false);
 assert.equal(starts, 1);
@@ -75,19 +75,18 @@ sandbox.searchInput.text = 'fresh';
 receive([row('apps', 'fresh', 'fresh')], 'apps', 'fresh', ['files'], {final: true, pending: [], failed: [], incremental: false});
 assert.equal(root.filtered[0].id, 'fresh');
 assert(root.flashMessage.includes('files'));
-// Old single-message hosts send no meta: treated as final.
+
 receive([row('apps', 'fresh', 'fresh')], 'apps', 'fresh', [], undefined);
 assert.equal(root.filtered[0].id, 'fresh');
 assert.equal(root.statusText, '');
 
-// Streaming: a partial emit, then a follow-up under the same id.
 root.flashMessage = '';
 sandbox.searchInput.text = 'fire';
 receive([row('apps', 'b', 'firewall'), row('apps', 'c', 'fire drill')], '', 'fire', [],
     {final: false, pending: ['files'], failed: [], incremental: false});
 assert.equal(root.statusText, 'searching…');
 assert.equal(root.selectedIndex, 0);
-// The user moves to "fire drill"; a better straggler arrives and ranks first.
+
 root.selectedIndex = 1; root.userMoved = true;
 const selected = root.filtered[1].id;
 receive([row('apps', 'b', 'firewall'), row('apps', 'c', 'fire drill'), row('menus', 'a', 'fire')], '', 'fire', [],
@@ -95,23 +94,22 @@ receive([row('apps', 'b', 'firewall'), row('apps', 'c', 'fire drill'), row('menu
 assert.equal(root.filtered[0].id, 'a', 'exact match ranks first');
 assert.equal(root.filtered[root.selectedIndex].id, selected, 'selection follows the same result');
 assert.equal(root.statusText, '');
-// Without user movement the top row stays selected.
+
 root.userMoved = false; root.selectedIndex = 0;
 receive([row('apps', 'b', 'firewall')], '', 'fire', [], {final: true, pending: [], failed: [], incremental: true});
 assert.equal(root.selectedIndex, 0);
-// While the action panel is open, follow-ups are deferred, never applied.
+
 root.panelOpen = true;
 const before = root.filtered;
 receive([row('apps', 'z', 'fire z')], '', 'fire', [], {final: true, pending: [], failed: [], incremental: true});
 assert.equal(root.filtered, before);
 assert(root.deferredUpdate !== null);
 root.panelOpen = false; root.deferredUpdate = null;
-// Failed vs slow providers are reported separately.
+
 receive([], '', 'fire', ['menus', 'files'], {final: true, pending: [], failed: ['menus'], incremental: false});
 assert(root.flashMessage.includes('unavailable: menus'));
 assert(root.flashMessage.includes('no reply from: files'));
 
-// Typing forward re-ranks the previous answer instantly (still cancelled).
 root.visible = true; root.flashMessage = '';
 sandbox.searchInput.text = 'fir';
 receive([row('apps', 'b', 'firewall'), row('apps', 'c', 'first aid')], '', 'fir', [], {final: true, pending: [], failed: [], incremental: false});
@@ -121,23 +119,22 @@ inputChanged();
 assert.equal(cancels, cancelsBefore + 1);
 assert.deepEqual(Array.from(root.filtered, r => r.id), ['b']);
 assert.equal(root.panelOpen, false);
-// Editing backwards re-ranks the same answer against the shorter text.
+
 sandbox.searchInput.text = 'fi';
 inputChanged();
 assert.deepEqual(Array.from(root.filtered, r => r.id), ['b', 'c']);
-// Nothing in the last answer matches: keep what is shown, never blank.
+
 sandbox.searchInput.text = 'xyz';
 inputChanged();
 assert.deepEqual(Array.from(root.filtered, r => r.id), ['b', 'c']);
 assert.equal(root.statusText, 'searching…');
 
-// localBare follows scope prefixes of the query the answer was for.
 assert.equal(context.localBare(' conf ', 'con', 'con'), 'conf');
 assert.equal(context.localBare('f: conf', 'f: con', 'con'), 'conf');
 assert.equal(context.localBare('f:conf', 'f: con', 'con'), 'conf');
 assert.equal(context.localBare('a: conf', 'f: con', 'con'), null);
 assert.equal(context.localBare('co', '', ''), 'co');
-// carryOver keeps pending providers' previous rows until the final message.
+
 const prev = [row('files', 'f1', 'config'), row('omarchy', 'o1', 'Config'), row('menus', 'm1', 'Configure')];
 let merged = context.carryOver(prev, [row('omarchy', 'o2', 'Config again')], ['files', 'menus'], false);
 assert.deepEqual(Array.from(merged, r => r.id), ['o2', 'f1', 'm1']);
@@ -146,9 +143,6 @@ assert.deepEqual(Array.from(merged, r => r.id), ['f2'], 'a provider that answere
 merged = context.carryOver(prev, [row('omarchy', 'o2', 'x')], ['files'], true);
 assert.deepEqual(Array.from(merged, r => r.id), ['o2'], 'final messages are authoritative');
 
-// Typing "con" -> "conf" -> "config": no blank frame, no stale rows after an
-// answer, stale ids dropped, and the final view is not reshuffled by
-// providers that answered late.
 const bridgeState = context.create();
 let sent = null;
 sandbox.bridge.search = q => { sent = {id: context.begin(bridgeState), q}; };
@@ -174,7 +168,7 @@ assert(!Array.from(root.filtered, r => r.id).includes('cons'), 'local re-rank dr
 assert(!hostReply(conId, 'con', apps, []), 'a stale reply for the old id is dropped');
 runSearch();
 const confId = sent.id;
-// The fast provider answers first; files is still pending and keeps its rows.
+
 assert(hostReply(confId, 'conf', omarchy, ['files']));
 assert.deepEqual(Array.from(root.filtered, r => r.provider).sort(), ['files', 'files', 'omarchy', 'omarchy']);
 assert(hostReply(confId, 'conf', omarchy.concat(files), []));
@@ -190,8 +184,6 @@ assert.deepEqual(Array.from(root.filtered, r => r.id), configLocal, 'final does 
 assert.equal(root.lastQuery, 'config');
 assert.notDeepEqual(conRows, []);
 
-// Esc on a confirmation card returns straight to the results list, cancelling
-// the confirmation; a second Esc then closes the overlay.
 {
     let confirming = true, cancelled = 0, resetCount = 0, dismissed = 0, replayed = 0;
     const panel = {get confirming() { return confirming; }, cancelConfirm() { cancelled++; confirming = false; },
