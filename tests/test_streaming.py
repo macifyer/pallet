@@ -224,7 +224,7 @@ class MergeStreamingTests(unittest.IsolatedAsyncioTestCase):
         self.assertFalse(argv['running'])
         self.assertEqual(argv['argv'], ['true'])
         self.assertEqual(argv['command'], 'true')
-        self.assertEqual(argv['exec'], ['bash', '-lc', 'exec "$@"', 'bash', 'true'])
+        self.assertEqual(argv['exec'], ['true'])
         self.assertEqual(argv['id'], 'av1')
         self.assertEqual(rejected['error'], 'command not found: pallet-definitely-missing-argv')
         self.assertNotIn('pid', rejected)

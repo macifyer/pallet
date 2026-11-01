@@ -10,7 +10,7 @@ An action is an operation attached to a result. The types the shell dispatches a
 
 ## Why it matters
 
-`launch` and `shell` run on this machine through the host's login shell. `launch` is an argv executed as `bash -lc 'exec "$@"'`. `shell` is a trusted command string executed as `bash -lc <command>`. `open` and `copy` go out the same way (`xdg-open`, `wl-copy`). `custom` is sent back to the provider that owns the row. `danger` set to `confirm` requires a second Enter. `tone` only picks the confirmation color: positive, warning, or danger.
+`launch`, `open`, and `copy` run on this machine through the host. An ordinary `launch` argv is executed directly. An `omarchy-*` argv uses `bash -lc 'exec "$@"'`. `shell` is a trusted command string executed as `bash -lc <command>`. `open` and `copy` use `xdg-open` and `wl-copy` directly. `custom` is sent back to the provider that owns the row. `danger` set to `confirm` requires a second Enter. `tone` only picks the confirmation color: positive, warning, or danger.
 
 ## Where it lives
 
