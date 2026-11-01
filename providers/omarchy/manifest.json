@@ -1,6 +1,6 @@
 {
   "name": "omarchy",
-  "description": "Omarchy menu parity: panels, triggers, style, and learning",
+  "description": "Every entry of the native Omarchy menu (run via omarchy-menu summon) plus shell panels",
   "exec": ["python3", "providers/omarchy/provider.py"],
   "triggers": [],
   "capabilities": ["search"]

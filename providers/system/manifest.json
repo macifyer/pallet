@@ -1,6 +1,6 @@
 {
   "name": "system",
-  "description": "System power, session, and update actions via official omarchy commands",
+  "description": "Key-bound Omarchy controls: volume, media, brightness, notifications, window helpers",
   "exec": ["python3", "providers/system/provider.py"],
   "triggers": [],
   "capabilities": ["search"]

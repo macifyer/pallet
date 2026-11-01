@@ -36,6 +36,26 @@ class AppDiscoveryTests(unittest.TestCase):
         target.write_text('[Desktop Entry]\nType=Application\nName=Demo\nExec=demo %U\n' + fields, encoding='utf-8')
         return target
 
+    def test_stale_list_serves_while_background_refresh_runs(self):
+        self.desktop()
+        apps.ensure_fresh()
+        self.assertEqual([a['name'] for a in apps._apps], ['Demo'])
+        self.desktop('other.desktop').write_text('[Desktop Entry]\nType=Application\nName=Other\nExec=other\n', encoding='utf-8')
+        apps._checked_at -= apps.CHECK_TTL_S + 1
+        gate = __import__('threading').Event()
+        real = apps.load_apps
+        def slow():
+            gate.wait(2)
+            return real()
+        with patch.object(apps, 'load_apps', side_effect=slow):
+            self.assertEqual([r['title'] for r in apps.search('o')], ['Demo'])  # stale, not blocked
+            gate.set()
+            for _ in range(200):
+                if len(apps._apps) == 2:
+                    break
+                __import__('time').sleep(0.01)
+        self.assertEqual(sorted(a['name'] for a in apps._apps), ['Demo', 'Other'])
+
     def test_terminal_primary_action_uses_default_terminal_dispatcher(self):
         self.desktop(fields='Terminal=true\n')
         result = apps.search('demo')[0]

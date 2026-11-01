@@ -12,14 +12,31 @@ Implemented in 0.9.0, native-session verification still required:
 - [x] Refresh on later searches, including in-place edits and removed entries.
 - [x] Isolated regression tests; no installed programs launched during discovery.
 
-Next foundation patches:
-- [ ] Reject stale responses by query ID in the frontend, including edits,
-      clearing, dismissing, reopening, and changing scope.
-- [ ] Preserve confirmations only for the exact selected result/query.
-- [ ] Show provider failures/timeouts and propagate action failures.
-- [ ] Ensure command suggestions cannot outrank meaningful local matches.
-- [ ] Conservative exact/prefix PATH command discovery and user-saved TUI
-      profiles; never execute candidate binaries to discover capabilities.
+Foundation patches (0.9.1–0.10.0; tests only, native-session verification
+still pending):
+- [x] Reject stale responses by query ID in the frontend, including edits,
+      clearing, dismissing, reopening, and changing scope (0.9.1).
+- [x] Preserve confirmations only for the exact selected result/query.
+- [x] Show provider failures/timeouts and propagate action failures
+      (provider `executed:false` and host launch failures).
+- [x] Ensure command suggestions cannot outrank meaningful local matches
+      (`fallback` rows always rank last).
+- [x] Conservative exact/prefix PATH command discovery; never execute
+      candidate binaries to discover capabilities.
+- [ ] User-saved TUI profiles.
+
+## 1b. Speed and Omarchy parity (0.10.0; native verification pending)
+
+- [x] Streamed partial results, routing hints, warm-on-open, background
+      indexes for files/apps, cache-first AT-SPI menus.
+- [x] Tiered ranking with stable ties and bounded frecency.
+- [x] Full native-menu parity through `omarchy-menu summon`, with guards and
+      confirmations; shell panels; key-bound system controls; Omarchy
+      default apps/web apps and web-app searches.
+- [ ] Verify on a native Omarchy session: overlay open time, streaming
+      without flicker, guard results matching the native menu, confirmations,
+      failure notifications.
+- [ ] Evaluate `checked` menu state (currently not shown).
 
 ### Terminal application usage
 
@@ -79,7 +96,8 @@ not launch terminals, install packages, or read personal vaults.
 
 ## 4. Recents and favorites
 
-- [ ] Empty-query recents, pinning, bounded ranking boosts, and stale-result
+- [x] Bounded ranking boosts from history (0.10.0).
+- [ ] Empty-query recents, pinning, and stale-result
       cleanup. History can be cleared or disabled; commands/secrets are not
       recorded by default.
 

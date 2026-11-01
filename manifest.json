@@ -2,10 +2,10 @@
   "schemaVersion": 1,
   "id": "io.github.macifyer.pallet",
   "name": "Pallet",
-  "version": "0.9.1",
+  "version": "0.10.0",
   "author": "macifyer",
   "license": "MIT",
-  "description": "A keyboard-driven command palette for Omarchy: applications, windows, AT-SPI menus, files, system actions, packages, Omarchy parity, plugins, run-any-command, and Obsidian actions with scoped provider prefixes in one Quickshell overlay.",
+  "description": "A keyboard-driven command palette for Omarchy: applications, windows, AT-SPI menus, files, the full Omarchy menu, system controls, Omarchy default apps and web apps, plugins, run-any-command with PATH discovery, and Obsidian actions with scoped provider prefixes in one Quickshell overlay.",
   "kinds": [
     "overlay",
     "service"
